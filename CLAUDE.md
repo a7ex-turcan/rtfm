@@ -298,7 +298,8 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 >
 > **Pinned so far:** `OpenSearch.Net` **1.8.0**; OpenSearch Docker image
 > **2.17.1** (Phase 0). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
-> `ReverseMarkdown` **5.4.0** (Phase 1a). Bump deliberately, not automatically.
+> `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b).
+> Bump deliberately, not automatically.
 
 ---
 
@@ -346,25 +347,26 @@ volume, healthcheck). `Rtfm.Mcp` is a stderr-only placeholder until Phase 4. The
 CLI dispatches subcommands with a plain `switch` (no System.CommandLine yet —
 adopt it if the command surface grows).
 
-### Phase 1 — Conversion pipeline (multi-format)
+### Phase 1 — Conversion pipeline (multi-format) ✅ **Done**
 In-process converters in `Rtfm.Core/Conversion`, dispatched by content sniffing
-(§2.5) and sharing a boilerplate-strip + ReverseMarkdown tail. Build in order:
-- **1a — MHTML** (`MimeKit` → `AngleSharp` strip → `ReverseMarkdown`). ✅ **Done.**
-- **1b — docx** (`Mammoth` → same tail). *Next.*
-- **1c — markdown** (`.md` passthrough with light normalization).
+(§2.5) and sharing a boilerplate-strip + ReverseMarkdown tail:
+- **1a — MHTML** (`MimeKit` → `AngleSharp` strip → `ReverseMarkdown`). ✅
+- **1b — docx** (`Mammoth` → same tail). ✅
+- **1c — markdown** (`.md` passthrough with light normalization). ✅
 
 **Done when:** each representative input converts to clean markdown with headings
 preserved and simple tables intact.
 
-*Delivered (1a):* `FormatDetector`, `MhtmlConverter`, shared
-`HtmlToMarkdownConverter` (boilerplate/attribute strip + ReverseMarkdown +
-normalization), `DocumentConverter` facade, and the `rtfm convert <path>` dev
-command. Validated against the five real exports: h1–h3 headings preserved,
-clean tables render as pipe tables. **Known limitation:** table cells containing
-nested lists/paragraphs stay as attribute-clean raw HTML (GitHub pipe tables
-can't hold block content) — the text is still retrievable. Fixture tests use a
-synthetic MHTML sample (the real corpus is gitignored). *docx heading-style and
-colspan-table caveats (§2.5) apply when 1b lands.*
+*Delivered:* `FormatDetector`, `MhtmlConverter`, `DocxConverter`,
+`MarkdownConverter`, the shared `HtmlToMarkdownConverter` (boilerplate/attribute
+strip + ReverseMarkdown + normalization), the `DocumentConverter` facade, and
+the `rtfm convert <path>` dev command. MHTML validated against the five real
+exports (h1–h3 preserved, clean tables → pipe tables); docx validated via a
+minimal real OOXML fixture (Heading 1 → `#`); md is a normalizing passthrough.
+**Known limitation:** table cells containing nested lists/paragraphs stay as
+attribute-clean raw HTML (GitHub pipe tables can't hold block content) — the
+text is still retrievable. Fixture tests are synthetic; the real corpus is
+gitignored.
 
 ### Phase 2 — Chunking
 Heading-aware splitter, breadcrumb prefixing, overlap, metadata
