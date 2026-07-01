@@ -1,0 +1,10 @@
+# Normalize line endings across platforms (this is a cross-platform project, §2.12).
+# Text files are stored as LF in the repo; Git converts on checkout per OS.
+* text=auto eol=lf
+
+# Explicitly binary — never touch these.
+*.docx binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.onnx binary
