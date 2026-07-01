@@ -296,8 +296,9 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 > Pin exact package versions at build time — verify latest stable against NuGet
 > when scaffolding.
 >
-> **Pinned so far (Phase 0):** `OpenSearch.Net` **1.8.0**; OpenSearch Docker
-> image **2.17.1**. Bump deliberately, not automatically.
+> **Pinned so far:** `OpenSearch.Net` **1.8.0**; OpenSearch Docker image
+> **2.17.1** (Phase 0). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
+> `ReverseMarkdown` **5.4.0** (Phase 1a). Bump deliberately, not automatically.
 
 ---
 
@@ -348,16 +349,22 @@ adopt it if the command surface grows).
 ### Phase 1 — Conversion pipeline (multi-format)
 In-process converters in `Rtfm.Core/Conversion`, dispatched by content sniffing
 (§2.5) and sharing a boilerplate-strip + ReverseMarkdown tail. Build in order:
-- **1a — MHTML** (`MimeKit` → strip → `ReverseMarkdown`). The real corpus; do
-  this first.
-- **1b — docx** (`Mammoth` → strip → `ReverseMarkdown`).
+- **1a — MHTML** (`MimeKit` → `AngleSharp` strip → `ReverseMarkdown`). ✅ **Done.**
+- **1b — docx** (`Mammoth` → same tail). *Next.*
 - **1c — markdown** (`.md` passthrough with light normalization).
 
 **Done when:** each representative input converts to clean markdown with headings
-preserved and simple tables intact. MHTML lands first and is validated against
-the five sample exports in `docs/`; docx and md follow. *Heading fidelity for the
-MHTML corpus is already confirmed good (§2.5); watch docx headings and colspan
-tables when those routes land.*
+preserved and simple tables intact.
+
+*Delivered (1a):* `FormatDetector`, `MhtmlConverter`, shared
+`HtmlToMarkdownConverter` (boilerplate/attribute strip + ReverseMarkdown +
+normalization), `DocumentConverter` facade, and the `rtfm convert <path>` dev
+command. Validated against the five real exports: h1–h3 headings preserved,
+clean tables render as pipe tables. **Known limitation:** table cells containing
+nested lists/paragraphs stay as attribute-clean raw HTML (GitHub pipe tables
+can't hold block content) — the text is still retrievable. Fixture tests use a
+synthetic MHTML sample (the real corpus is gitignored). *docx heading-style and
+colspan-table caveats (§2.5) apply when 1b lands.*
 
 ### Phase 2 — Chunking
 Heading-aware splitter, breadcrumb prefixing, overlap, metadata
