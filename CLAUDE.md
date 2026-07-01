@@ -4,10 +4,11 @@
 > (The team knows what it really stands for. The README does not.)
 
 A local, per-developer documentation retrieval tool. It indexes a folder of
-Confluence-exported `.docx` documentation into a local OpenSearch instance and
-exposes it to any MCP-capable LLM client (Claude Code, Claude Desktop, IDE
-integrations) over a stdio MCP server. Instead of manually attaching docs to a
-chat, a developer asks their LLM and it retrieves the relevant passages itself.
+documentation — Confluence MHTML exports (`.doc`), Word `.docx`, and plain
+Markdown (`.md`) — into a local OpenSearch instance and exposes it to any
+MCP-capable LLM client (Claude Code, Claude Desktop, IDE integrations) over a
+stdio MCP server. Instead of manually attaching docs to a chat, a developer asks
+their LLM and it retrieves the relevant passages itself.
 
 The tool answers two kinds of question well:
 
@@ -25,13 +26,13 @@ deliberate decision, not an accident (see §2).
 
 ```
         ┌─────────────────────────────────────────────────────────┐
-        │  docs/  (Confluence-exported .docx, mostly static)        │
+        │  docs/  (MHTML/.doc, .docx, .md — mostly static)          │
         └───────────────────────────┬─────────────────────────────┘
                                      │  read
                                      ▼
         ┌─────────────────────────────────────────────────────────┐
         │  rtfm  (console CLI, long-lived in watch mode)            │
-        │   ├─ convert:  Mammoth (.docx→HTML) → ReverseMarkdown     │
+        │   ├─ convert:  MHTML/docx/md → HTML → ReverseMarkdown     │
         │   ├─ chunk:    heading-aware, breadcrumb + overlap        │
         │   └─ index:    bulk upsert / delete into OpenSearch       │
         └───────────────────────────┬─────────────────────────────┘
@@ -103,33 +104,70 @@ The doc set changes only occasionally. So:
 
 No live pipeline / CDC / TTL machinery. See §2.8 for watch-mode specifics.
 
-### 2.5 Conversion: in-process, Route A (Mammoth → ReverseMarkdown)
-**Decision: Option A.** Convert `.docx` entirely in-process — no Pandoc, no
-native binary, no PATH problems for per-dev distribution.
+### 2.5 Conversion: in-process, multi-format → markdown
+**Decision: convert everything in-process — no Pandoc, no native binary, no
+PATH problems for per-dev distribution.** Three input formats are supported,
+delivered in this order:
 
-Pipeline: **Mammoth (.NET)** converts `.docx` → semantic HTML using the
-document's *style names* (a paragraph styled `Heading 1` becomes `<h1>`), then
-**ReverseMarkdown** converts that HTML → markdown. Mammoth's own direct-to-
-markdown output is deprecated; the maintainer recommends HTML + a separate
-markdown converter, which yields better results.
+1. **MHTML** (`.doc`) — Confluence's "Export to Word" output. *Despite the
+   `.doc` extension these are **not** Word files at all: they are MIME
+   `multipart/related` documents wrapping a **quoted-printable** `text/html`
+   part plus base64 image parts.* (Confirmed against the real corpus — see the
+   finding below.) **Ship first** — this is what the sample corpus actually is.
+2. **`.docx`** — genuine Word / Open XML. Ship second.
+3. **`.md`** — plain Markdown. Ship third; near-trivial passthrough.
 
-**Known caveats (both are real, plan around them):**
-- **Style-driven dependency.** Mammoth keys off real heading styles. If
-  Confluence authors *manually bolded* text instead of using Heading styles,
-  the hierarchy collapses to flat paragraphs. → **Spot-check real exports
-  early (Phase 1).** If headings are faked, we need a heuristic pass (detect
-  bold-only "heading-like" lines) or we accept flatter chunks.
+**Route by sniffing content, not just the extension** — the sample files prove
+the extension lies (a `.doc` that is really MHTML). Detection order:
+- zip magic `PK\x03\x04` → **docx**
+- MIME headers (`MIME-Version:` / `multipart/related`) → **MHTML**
+- otherwise, `.md` extension → **markdown passthrough**
+
+**Per-format front end, shared back end.** Each route produces HTML (markdown
+skips straight to the end), then a **common tail** strips boilerplate (§2.6) and
+runs **ReverseMarkdown** (HTML → markdown). Chunking (Phase 2) is
+format-agnostic: it only ever sees markdown + a heading path.
+
+- **MHTML route:** **MimeKit** parses the container, selects the `text/html`
+  part and decodes quoted-printable → shared strip + **ReverseMarkdown**.
+- **docx route:** **Mammoth (.NET)** converts `.docx` → semantic HTML using the
+  document's *style names* (a paragraph styled `Heading 1` becomes `<h1>`) →
+  same tail. Mammoth's own direct-to-markdown output is deprecated; HTML + a
+  separate markdown converter yields better results.
+- **markdown route:** already markdown — passthrough with only light
+  normalization; no HTML stage.
+
+> **Real-corpus finding (Phase 1 spot-check — done):** the five sample exports
+> in `docs/` are all MHTML with **real `<h1>`/`<h2>`/`<h3>` heading tags**, so
+> the "faked headings" risk below is **false for this corpus** — heading-aware
+> chunking will work. Tables are standard HTML (`confluenceTable`) with some
+> **colspan** (3–7 per file) and **no rowspan**.
+
+**Known caveats (plan around them):**
+- **Style-driven headings (docx route only).** Mammoth keys off real heading
+  styles. If a `.docx` author *manually bolded* text instead of using Heading
+  styles, the hierarchy collapses to flat paragraphs. Spot-check `.docx` inputs
+  when that route lands (a heuristic bold-line pass is the fallback). Does **not**
+  affect MHTML, which carries real heading tags.
 - **Tables.** Simple parameter/endpoint tables round-trip into markdown pipe
-  tables fine. Merged-cell / nested tables can scramble. Tables carry the
-  *technical* answers, so this matters. → If specific docs mangle, drop to the
-  **Open XML SDK** (`DocumentFormat.OpenXml`) *for table extraction only* and
-  let Mammoth handle prose (hybrid converter). Don't pre-build this; add it if
-  Phase 1 spot-checks show we need it.
+  tables fine. **colspan** can't be expressed in a pipe table (a merged cell
+  collapses to one column with blanks alongside — usually still readable);
+  merged/nested tables can scramble further. Tables carry the *technical*
+  answers, so watch them. → For the **docx** route only, if specific docs mangle,
+  drop to the **Open XML SDK** (`DocumentFormat.OpenXml`) *for table extraction
+  only*. Don't pre-build it. (For MHTML the tables are already HTML, so any fix
+  is a DOM-level pass, not Open XML.)
 
-### 2.6 Strip Confluence boilerplate
+### 2.6 Strip boilerplate
 Exports carry page footers ("Created by… last modified…"), breadcrumbs, and
 macro residue. Filter these before indexing or they pollute both lexical and
-semantic matches.
+semantic matches. Do it as a DOM pass (an HTML library) before ReverseMarkdown,
+not with regexes on the markdown.
+
+Concrete Confluence chrome seen in the real corpus (strip or unwrap these):
+`jira-issue-key`, `icon`, `summary` (Jira macro tables), `inline-comment-marker`
+(unwrap — keep the text), `external-link` link chrome, `table-wrap` /
+`contentLayout2` / `Section1` layout wrappers, and the page footer block.
 
 ### 2.7 Chunking: heading-aware with breadcrumb + overlap
 Chunk quality is the single biggest driver of retrieval quality — more than the
@@ -244,9 +282,12 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 |---|---|
 | Runtime | .NET 10 |
 | MCP server | `ModelContextProtocol` (+ `Microsoft.Extensions.Hosting`) |
+| MHTML (`.doc`) → HTML | `MimeKit` (MIME parse + quoted-printable decode) |
 | docx → HTML | `Mammoth` |
+| HTML DOM / boilerplate strip | `AngleSharp` |
 | HTML → markdown | `ReverseMarkdown` |
-| Tables fallback (only if needed) | `DocumentFormat.OpenXml` |
+| Markdown (`.md`) input | none — passthrough |
+| Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
 | Embeddings (Tier 2) | local ONNX Runtime, small embedding model |
@@ -304,14 +345,19 @@ volume, healthcheck). `Rtfm.Mcp` is a stderr-only placeholder until Phase 4. The
 CLI dispatches subcommands with a plain `switch` (no System.CommandLine yet —
 adopt it if the command surface grows).
 
-### Phase 1 — Conversion pipeline
-Mammoth → ReverseMarkdown in `Rtfm.Core/Conversion`. Boilerplate stripping
-(footers, breadcrumbs, macro residue). **Spot-check against several real
-Confluence exports**, especially heading fidelity and tables.
-**Done when:** a representative `.docx` converts to clean markdown with headings
-preserved and simple tables intact; the heading-style caveat (§2.5) is confirmed
-true/false for our actual corpus. *If headings are faked or tables mangle, log
-it and decide on the heuristic / Open XML fallback before moving on.*
+### Phase 1 — Conversion pipeline (multi-format)
+In-process converters in `Rtfm.Core/Conversion`, dispatched by content sniffing
+(§2.5) and sharing a boilerplate-strip + ReverseMarkdown tail. Build in order:
+- **1a — MHTML** (`MimeKit` → strip → `ReverseMarkdown`). The real corpus; do
+  this first.
+- **1b — docx** (`Mammoth` → strip → `ReverseMarkdown`).
+- **1c — markdown** (`.md` passthrough with light normalization).
+
+**Done when:** each representative input converts to clean markdown with headings
+preserved and simple tables intact. MHTML lands first and is validated against
+the five sample exports in `docs/`; docx and md follow. *Heading fidelity for the
+MHTML corpus is already confirmed good (§2.5); watch docx headings and colspan
+tables when those routes land.*
 
 ### Phase 2 — Chunking
 Heading-aware splitter, breadcrumb prefixing, overlap, metadata
@@ -404,6 +450,9 @@ Notes on this:
   trailers, "Generated with Claude Code" lines, or any similar attribution to
   commit messages, PR descriptions, or code comments. Write commit messages as
   the developer, nothing more.
-- Domain note: the docs appear to be FHIR-flavored healthcare API material
-  (e.g. "Bundle"), which is exactly the mixed lexical/conceptual profile this
-  design targets.
+- Domain note: the real corpus (`docs/`) is product/architecture material for an
+  access-control / multi-tenant platform — RBAC product & role classification,
+  ABAC segmentation, an MSP central-configuration model, a workflow engine PRD,
+  and location confidence/impact. It mixes exact technical terms (roles,
+  attributes, config keys) with conceptual definitions — exactly the mixed
+  lexical/conceptual profile this design targets.

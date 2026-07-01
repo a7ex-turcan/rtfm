@@ -3,6 +3,9 @@
 * text=auto eol=lf
 
 # Explicitly binary — never touch these.
+# .doc here is Confluence MHTML: it is MIME-structured (CRLF-significant), so
+# never let Git normalize its line endings.
+*.doc binary
 *.docx binary
 *.png binary
 *.jpg binary
