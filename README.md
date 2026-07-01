@@ -53,8 +53,9 @@ Runs on Windows, macOS, and Linux.
 
 ## Getting started
 
-> **Status:** early development — the solution is being scaffolded. The commands
-> below describe the intended workflow; not all are wired up yet.
+> **Status:** early development. The scaffold, local OpenSearch, and the
+> `rtfm ping` health check work today (Phase 0). The `index` / `watch` commands
+> below describe the intended workflow and are not wired up yet.
 
 ```bash
 # 1. Start the local search store
@@ -63,10 +64,13 @@ docker compose up -d
 # 2. Build
 dotnet build -c Release
 
-# 3. Index your documentation
+# 3. Confirm the CLI can reach OpenSearch   ← works today
+dotnet run --project src/Rtfm.Cli -- ping
+
+# 4. Index your documentation               (coming: Phase 3)
 dotnet run --project src/Rtfm.Cli -- index ./docs
 
-# 4. (optional) Keep the index fresh as docs change
+# 5. (optional) Keep the index fresh as docs change   (coming: Phase 5)
 dotnet run --project src/Rtfm.Cli -- watch ./docs
 ```
 

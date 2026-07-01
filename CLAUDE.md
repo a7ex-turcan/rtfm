@@ -254,6 +254,9 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 
 > Pin exact package versions at build time — verify latest stable against NuGet
 > when scaffolding.
+>
+> **Pinned so far (Phase 0):** `OpenSearch.Net` **1.8.0**; OpenSearch Docker
+> image **2.17.1**. Bump deliberately, not automatically.
 
 ---
 
@@ -266,6 +269,8 @@ rtfm/
 ├─ Rtfm.slnx                     # XML solution format (slnx, not legacy .sln)
 ├─ src/
 │  ├─ Rtfm.Core/                 # shared: conversion, chunking, OpenSearch access
+│  │  ├─ Configuration/          # environment/config resolution (RtfmEnvironment)
+│  │  ├─ OpenSearch/             # connection + cluster health (gateway, low-level client)
 │  │  ├─ Conversion/             # Mammoth + ReverseMarkdown pipeline, boilerplate strip
 │  │  ├─ Chunking/               # heading-aware chunker, breadcrumb builder
 │  │  ├─ Indexing/               # mapping, bulk upsert, delete-by-query
@@ -287,10 +292,17 @@ chunking, and search logic lives in Core and is shared.
 Phased so each milestone is independently verifiable. Each phase has a
 "**Done when**" acceptance criterion to build against.
 
-### Phase 0 — Scaffold & infra
+### Phase 0 — Scaffold & infra ✅ **Done**
 Solution structure, `docker-compose.yml` for single-node OpenSearch, a thin
 health-check command (`rtfm ping`) that confirms connectivity to OpenSearch.
 **Done when:** `docker compose up -d` + `rtfm ping` reports a healthy cluster.
+
+*Delivered:* `Rtfm.slnx` + the four projects; `RtfmEnvironment` (resolves
+`RTFM_OPENSEARCH_URL`) and `OpenSearchGateway.PingAsync` in Core; the `rtfm ping`
+command; compose with a single-node cluster (security disabled, persistent
+volume, healthcheck). `Rtfm.Mcp` is a stderr-only placeholder until Phase 4. The
+CLI dispatches subcommands with a plain `switch` (no System.CommandLine yet —
+adopt it if the command surface grows).
 
 ### Phase 1 — Conversion pipeline
 Mammoth → ReverseMarkdown in `Rtfm.Core/Conversion`. Boilerplate stripping
