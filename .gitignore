@@ -103,3 +103,8 @@ appsettings.*.local.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local documentation corpus — real internal exports kept as local-only test
+# fixtures; never committed (see CLAUDE.md §7). Sanitized fixtures for tests
+# live under tests/, not here.
+/docs/
