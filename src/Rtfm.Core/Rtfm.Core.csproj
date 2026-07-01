@@ -7,7 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.5.1" />
+    <PackageReference Include="MimeKit" Version="4.17.0" />
     <PackageReference Include="OpenSearch.Net" Version="1.8.0" />
+    <PackageReference Include="ReverseMarkdown" Version="5.4.0" />
   </ItemGroup>
 
 </Project>

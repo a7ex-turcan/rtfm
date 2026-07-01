@@ -10,6 +10,9 @@ switch (args[0])
     case "ping":
         return await PingCommand.RunAsync(args[1..]);
 
+    case "convert":
+        return ConvertCommand.Run(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -22,8 +25,9 @@ static int PrintUsage()
         rtfm — Retrieval Tool For Manuals
 
         Usage:
-          rtfm ping        Check connectivity to OpenSearch
-          rtfm --help      Show this help
+          rtfm ping             Check connectivity to OpenSearch
+          rtfm convert <path>   Convert one document to markdown (stdout)
+          rtfm --help           Show this help
 
         Environment:
           RTFM_OPENSEARCH_URL   OpenSearch endpoint (default http://localhost:9200)
