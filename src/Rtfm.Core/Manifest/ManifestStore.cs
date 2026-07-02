@@ -37,10 +37,57 @@ public sealed class ManifestStore
         var hash = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes($"{normalizedFolder}|{project}")))[..16].ToLowerInvariant();
 
-        var dir = Path.Combine(ResolveStateDirectory(), "rtfm", "manifests");
+        var dir = ManifestsDirectory;
         Directory.CreateDirectory(dir);
         return new ManifestStore(normalizedFolder, project, Path.Combine(dir, $"{hash}.json"));
     }
+
+    /// <summary>
+    /// The manifest files belonging to <paramref name="project"/> (any folder).
+    /// The project name lives inside each file, so this scans and parses;
+    /// unreadable files are skipped.
+    /// </summary>
+    public static IReadOnlyList<string> FindManifests(string project)
+    {
+        if (!Directory.Exists(ManifestsDirectory))
+        {
+            return [];
+        }
+
+        var matches = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(ManifestsDirectory, "*.json"))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<ManifestFile>(File.ReadAllText(file));
+                if (string.Equals(parsed?.Project, project, StringComparison.Ordinal))
+                {
+                    matches.Add(file);
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or IOException)
+            {
+                // Not ours to judge — skip.
+            }
+        }
+
+        return matches;
+    }
+
+    /// <summary>Deletes every manifest belonging to <paramref name="project"/>. Returns the count removed.</summary>
+    public static int PurgeManifests(string project)
+    {
+        var removed = 0;
+        foreach (var file in FindManifests(project))
+        {
+            File.Delete(file);
+            removed++;
+        }
+
+        return removed;
+    }
+
+    private static string ManifestsDirectory => Path.Combine(ResolveStateDirectory(), "rtfm", "manifests");
 
     /// <summary>Reads the manifest, or an empty one if none exists / it can't be parsed.</summary>
     public DocumentManifest Load()

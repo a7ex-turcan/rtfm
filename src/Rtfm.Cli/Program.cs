@@ -27,6 +27,9 @@ switch (args[0])
     case "watch":
         return await WatchCommand.RunAsync(args[1..]);
 
+    case "purge":
+        return await PurgeCommand.RunAsync(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -49,6 +52,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]index[/] [dim]<folder> [[--project <name>]][/]", "(Re)index a folder (default project \"default\")");
     commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder> [[--project <name>]][/]", "Watch a folder and keep the index fresh (Ctrl+C to stop)");
     commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
+    commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");
     commands.AddRow($"[{Ui.Accent}]chunk[/] [dim]<path>[/]", "Convert then show heading-aware chunks (stdout)");
     Ui.Out.Write(commands);

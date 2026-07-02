@@ -336,6 +336,10 @@ project" reuses delete-by-query (§2.9).
 - **Index:** `rtfm index <folder> --project <name>` (default `"default"`). A
   file belongs to one project at a time; re-indexing it under a new name moves
   it.
+- **Drop:** `rtfm purge <project> [--yes]` — the promised delete-by-query drop,
+  plus removal of the project's watch manifests (a purge that left those would
+  hand the next `rtfm watch` a stale reconcile baseline). Confirms
+  interactively; refuses without `--yes` when non-interactive.
 - **Consume (Phase 4):** an `RTFM_PROJECT` env var in `.mcp.json` sets the
   default scope. Because `.mcp.json` is already project-scoped and committed per
   repo (§6), each repo auto-scopes RTFM to its own project — near-zero ergonomic

@@ -85,8 +85,11 @@ public sealed class OpenSearchGateway
         return true;
     }
 
-    /// <summary>Deletes all documents whose exact <paramref name="field"/> equals <paramref name="value"/> (§2.9).</summary>
-    public async Task DeleteByTermAsync(string index, string field, string value, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Deletes all documents whose exact <paramref name="field"/> equals
+    /// <paramref name="value"/> (§2.9). Returns the number of documents deleted.
+    /// </summary>
+    public async Task<long> DeleteByTermAsync(string index, string field, string value, CancellationToken cancellationToken = default)
     {
         var query = new { query = new { term = new Dictionary<string, string> { [field] = value } } };
         var body = JsonSerializer.Serialize(query);
@@ -95,6 +98,11 @@ public sealed class OpenSearchGateway
             .ConfigureAwait(false);
 
         EnsureSuccess(response, $"delete_by_query on {index}.{field}");
+
+        using var doc = JsonDocument.Parse(response.Body);
+        return doc.RootElement.TryGetProperty("deleted", out var deleted) && deleted.ValueKind == JsonValueKind.Number
+            ? deleted.GetInt64()
+            : 0;
     }
 
     /// <summary>Sends a pre-built NDJSON <c>_bulk</c> payload and throws if any item failed.</summary>

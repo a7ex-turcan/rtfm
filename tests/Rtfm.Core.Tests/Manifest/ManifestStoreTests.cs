@@ -50,6 +50,38 @@ public class ManifestStoreTests
         Assert.Equal(0, billing.Load().Count);
     }
 
+    [Fact]
+    public void PurgeManifests_removes_only_the_projects_manifests()
+    {
+        // Unique project names: FindManifests scans the real per-user manifests
+        // directory, so tests must never touch a name a human might use.
+        var doomed = $"test-purge-{Guid.NewGuid():n}";
+        var spared = $"test-keep-{Guid.NewGuid():n}";
+
+        try
+        {
+            var manifest = new DocumentManifest();
+            manifest.Set("d:/docs/x.doc", new ManifestEntry(1, 2));
+
+            ManifestStore.For(NewTempFolder(), doomed).Save(manifest);
+            ManifestStore.For(NewTempFolder(), doomed).Save(manifest); // second folder, same project
+            ManifestStore.For(NewTempFolder(), spared).Save(manifest);
+
+            Assert.Equal(2, ManifestStore.FindManifests(doomed).Count);
+
+            var removed = ManifestStore.PurgeManifests(doomed);
+
+            Assert.Equal(2, removed);
+            Assert.Empty(ManifestStore.FindManifests(doomed));
+            Assert.Single(ManifestStore.FindManifests(spared));
+        }
+        finally
+        {
+            ManifestStore.PurgeManifests(doomed);
+            ManifestStore.PurgeManifests(spared);
+        }
+    }
+
     // A distinct, non-existent folder per test so runs don't collide.
     private static string NewTempFolder()
         => Path.Combine(Path.GetTempPath(), "rtfm-tests", Guid.NewGuid().ToString("n"));
