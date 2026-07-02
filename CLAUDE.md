@@ -253,8 +253,10 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-Possible later additions (don't build yet): `get_document(path)` to fetch a full
-page, `list_sources()` to enumerate indexed docs.
+Later additions are now scheduled rather than hypothetical: `get_document` /
+`list_sources` / `find_similar` are **Phase 7**; `list_contradictions` is
+Phase 11; correction tools are Phase 12. Don't build any of them ahead of their
+phase.
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -571,6 +573,124 @@ mapped to functions" and exact-token `BUSINESS_LINE__C` keep their top hits);
 project scoping verified through the hybrid path; MCP re-verified over raw
 stdio (pure JSON-RPC stdout, hybrid ranking, ~0.5s tool call, embedder lazy so
 the handshake stays instant).
+
+---
+
+Phases 0–6 delivered the original scope: the tool answers both question types
+end-to-end. The phases below extend it — same rules: independently verifiable,
+one phase at a time, resist pulling work forward.
+
+### Phase 7 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar`
+The §2.11 "possible later additions", promoted: using the tool in anger shows
+the agent often needs more than a 1600-char chunk.
+- `get_document(path, project?)` — the full converted markdown of one document,
+  reassembled from its chunks in ordinal order (the source file may be MHTML —
+  the *converted* form is what the agent can read). For when a hit is right but
+  the answer sprawls past chunk boundaries.
+- `list_sources(project?)` — enumerate indexed docs (path, title, project,
+  `source_modified_at`, chunk count). Gives the agent *corpus awareness*: it can
+  tell "the docs don't cover this" apart from "my query was bad", and can cite
+  what exists before drilling in.
+- `find_similar(path, top_k?)` — semantically nearest *other* documents, via
+  mean of the doc's chunk vectors (or its top chunk) against `content_vector`.
+  Cheap now that Tier 2 exists; useful for "what else discusses this?".
+All three are aggregations/lookups over fields already indexed — no mapping or
+ingest changes.
+**Done when:** from Claude Code, an answer that spans chunk boundaries can be
+completed via `get_document`; `list_sources` returns the full corpus with
+correct metadata; `find_similar` on the RBAC doc surfaces the ABAC doc.
+
+### Phase 8 — Format expansion: PDF, Excel, CSV
+Widen §2.5's converter fan-in; the shared tail (strip → markdown → chunk) stays
+untouched, so each format is only a new front end + detection rule.
+- **PDF** — candidate: `UglyToad.PdfPig` (pure managed, MIT). Detect by `%PDF`
+  magic. Text extraction with heading *heuristics* (font size/weight) — PDFs
+  carry no real heading semantics, so expect flatter breadcrumbs; page-window
+  chunking is the fallback. PDF tables are the known hard part — start with
+  text-run extraction and accept imperfect tables rather than pre-building a
+  table reconstructor.
+- **Excel (`.xlsx`)** — candidate: `ClosedXML`. Detect: zip magic like docx, so
+  disambiguate by container content (`xl/` vs `word/`). Each sheet becomes a
+  section (breadcrumb: `Workbook > Sheet`), its used range a pipe table. The
+  chunker already splits oversized tables by rows repeating the header row —
+  built for exactly this.
+- **CSV** — near-trivial: one pipe table, filename as title; extension-detected.
+  No new dependency unless quoting/edge cases demand one.
+Pin exact package versions at build time, per §3.
+**Done when:** a representative PDF, a multi-sheet workbook, and a CSV each
+index and answer a lookup question about their own content; existing formats
+unregressed.
+
+### Phase 9 — Observability: `rtfm status` + staleness
+The index is a black box unless you curl OpenSearch. One read-only command:
+- `rtfm status` — per project: doc/chunk counts, newest/oldest
+  `source_modified_at`, last `indexed_at`, vector coverage (% chunks embedded);
+  plus environment: OpenSearch reachable, model cached, manifest freshness.
+- `rtfm status --stale <days>` — list docs whose `source_modified_at` is older
+  than the window. The corpus is *manual exports* (Confluence pull is a
+  non-goal, below) — drift from the live wiki is invisible, so surface age
+  instead. Also fold a one-line hint into the `search_docs` description so the
+  agent treats very old `source_modified_at` with suspicion (§2.13 B already
+  carries the date).
+**Done when:** `rtfm status` reports accurate counts/dates against the live
+index, and `--stale` flags a deliberately-backdated doc.
+
+### Phase 10 — Tier 3 retrieval: cross-encoder reranking
+The next precision lever after hybrid (§2.10): retrieve generously (the hybrid
+k is already 25+), then rerank the candidates with a small local cross-encoder
+(candidate: ms-marco-MiniLM family via ONNX — same runtime, tokenizer, and
+model-store machinery as Phase 6) and return the top `top_k`. Query-time only —
+no ingest or mapping changes; reuse `EmbeddingModelStore` for the second model.
+Same degradation rule as Tier 2: no model → skip reranking, loudly.
+**Done when:** a query set over the real corpus shows reranked top-3 ≥ hybrid
+top-3 (spot-check, not benchmark), with no query slower than ~1s end-to-end.
+
+### Phase 11 — Proactive contradiction detection (§2.13's Tier-2 add-on, now unblocked)
+The identity feature: docs rot and disagree, and nobody notices until it burns
+someone. At ingest, compare each new chunk's vector against *similar* chunks
+from **other documents in the same project** (cross-project differences are
+expected — §2.14). High semantic similarity + disagreeing content ⇒ record a
+candidate pair (source paths, ordinals, similarity, timestamps) into a small
+side index (it must survive re-index of either doc; delete pairs when either
+side's doc is re-ingested and re-evaluate).
+- Surfacing: `rtfm contradictions [--project]` lists pairs newest-first; a
+  `list_contradictions` MCP tool exposes the same so the agent can warn.
+- Judging "disagreement" needs care: similarity alone flags near-duplicates.
+  Start dumb (similar + different dates + not near-identical text) and let the
+  LLM do the actual contradiction reasoning at read time (§2.13 B) — RTFM only
+  *nominates* pairs. No auto-resolution.
+**Done when:** planting a doc that contradicts an existing statement (the §2.13
+`admin` vs `super-admin` example) yields exactly that pair in
+`rtfm contradictions`, and the MCP tool returns it with both dates.
+
+### Phase 12 — Corrections that survive re-index (§2.13 C, decision + build)
+When an agent + user confirm "the docs are wrong / outdated here", persist that
+knowledge. Leading option per §2.13 C: a separate **overrides index** (option 2)
+— keeps `rtfm-docs` purely derived (§2.9 delete-by-query stays safe), merged at
+query time; an override records scope (project + source path or topic), the
+correction text, author, and timestamp. MCP tools: `add_note` /
+`list_notes` (naming TBD), human-in-the-loop only — the agent proposes, the
+user confirms. **This phase starts with a design pass on §2.13 C's options
+before any code.**
+**Done when:** a confirmed correction outranks/annotates the stale passage in
+`search_docs` results, survives a full re-index of the corpus, and is visibly
+attributed as an override (never silently masquerading as source text).
+
+### Phase 13 — Packaging & distribution
+Adoption currently requires cloning the repo and building. Ship `rtfm` +
+`rtfm-mcp` as proper artifacts: `dotnet tool install -g` (or single-file
+published exes), with `.mcp.json` guidance updated to match (§6's "published
+single-file exe is the cleaner long-term answer"). Include the §2.12 setup
+notes (`vm.max_map_count` on native Linux) in the install story. Can be pulled
+earlier if a second user shows up before Phases 7–12 land.
+**Done when:** a machine without the repo can install both tools, run
+`docker compose up -d` + `rtfm index`, and wire the MCP server into Claude Code
+from the published artifact alone.
+
+**Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
+manual exports remain the ingestion contract for now — Phase 9's staleness
+surfacing is the mitigation), web UI (the LLM client is the UX, §2.11), cloud
+sync/hosting (per-dev local is the model, §intro).
 
 ---
 
