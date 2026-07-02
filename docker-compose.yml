@@ -4,6 +4,11 @@
 # Native Linux hosts must raise a kernel limit or the container won't start
 # (Docker Desktop on macOS/Windows sets this automatically inside its VM):
 #   sudo sysctl -w vm.max_map_count=262144      # persist it in /etc/sysctl.conf
+#
+# Core stack:   docker compose up -d
+# + Dashboards: docker compose --profile debug up -d   → http://localhost:5601
+#   (Dashboards is a debug-only aid behind the "debug" profile, so the default
+#    up stays lean — see the "dashboards" service below.)
 services:
   opensearch:
     image: opensearchproject/opensearch:2.17.1
@@ -31,6 +36,22 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  # Optional web UI for inspecting the index (debug aid). Only starts with the
+  # "debug" profile. Version-matched to OpenSearch; security disabled to match
+  # the cluster above.
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.17.1
+    container_name: rtfm-dashboards
+    profiles: ["debug"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5601:5601"
 
 volumes:
   rtfm-opensearch-data:

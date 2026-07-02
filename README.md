@@ -67,11 +67,24 @@ dotnet build -c Release
 # 3. Confirm the CLI can reach OpenSearch   ← works today
 dotnet run --project src/Rtfm.Cli -- ping
 
-# 4. Index your documentation               (coming: Phase 3)
+# 4. Index your documentation               ← works today
 dotnet run --project src/Rtfm.Cli -- index ./docs
 
-# 5. (optional) Keep the index fresh as docs change   (coming: Phase 5)
+# 5. Search it from the CLI                  ← works today
+dotnet run --project src/Rtfm.Cli -- search "how are roles mapped to functions"
+
+# 6. (optional) Keep the index fresh as docs change   (coming: Phase 5)
 dotnet run --project src/Rtfm.Cli -- watch ./docs
+```
+
+### Inspecting the index (optional)
+
+For a visual look at the index while debugging, start OpenSearch Dashboards via
+the `debug` compose profile (kept out of the default `up` so the core stack
+stays lean):
+
+```bash
+docker compose --profile debug up -d      # → http://localhost:5601
 ```
 
 ### Wiring into Claude Code

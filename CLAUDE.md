@@ -96,6 +96,12 @@ No cluster, no auth headaches. Shipped via `docker-compose.yml` so a dev runs
 `docker compose up -d` once.
 - **Non-goal:** .NET Aspire orchestration. It's a single container per dev;
   Aspire is overkill here and adds a dependency. Plain compose.
+- **Optional debug UI:** OpenSearch Dashboards is wired into `docker-compose.yml`
+  behind a `debug` profile (`docker compose --profile debug up -d` →
+  `http://localhost:5601`), version-matched with security disabled. It is a
+  debugging aid only — deliberately *not* part of the default `up`, and not a
+  human-facing UX for RTFM (the LLM client is the UX, §2.11). A purpose-built
+  dashboard is only worth revisiting for §2.13 C contradiction curation.
 
 ### 2.4 Corpus is static → batch index + watch
 The doc set changes only occasionally. So:
