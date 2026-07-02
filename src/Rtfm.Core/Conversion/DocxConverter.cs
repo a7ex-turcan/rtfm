@@ -1,3 +1,6 @@
+using System.IO.Compression;
+using System.Xml.Linq;
+
 namespace Rtfm.Core.Conversion;
 
 /// <summary>
@@ -10,14 +13,18 @@ namespace Rtfm.Core.Conversion;
 /// </summary>
 public sealed class DocxConverter
 {
+    private static readonly XNamespace DcTerms = "http://purl.org/dc/terms/";
+
     private readonly HtmlToMarkdownConverter _html = new();
     private readonly Mammoth.DocumentConverter _mammoth = new();
 
     public ConversionResult Convert(Stream input, string sourcePath)
     {
-        // Mammoth keys off real heading styles; manually-bolded "headings" flatten
-        // to paragraphs (§2.5 caveat). Warnings are available on result.Warnings
-        // if we ever need to surface style problems.
+        // Pull the embedded modified date from docProps/core.xml before Mammoth
+        // reads the stream (§2.13 A). Mammoth keys off real heading styles;
+        // manually-bolded "headings" flatten to paragraphs (§2.5 caveat).
+        var modifiedAt = TryReadModified(input);
+
         var result = _mammoth.ConvertToHtml(input);
         var conversion = _html.Convert(result.Value);
 
@@ -25,6 +32,40 @@ public sealed class DocxConverter
             SourcePath: sourcePath,
             Format: DocumentFormat.Docx,
             Markdown: conversion.Markdown,
-            Title: conversion.Title);
+            Title: conversion.Title,
+            SourceModifiedAt: modifiedAt);
+    }
+
+    private static DateTimeOffset? TryReadModified(Stream input)
+    {
+        if (!input.CanSeek)
+        {
+            return null;
+        }
+
+        var origin = input.Position;
+        try
+        {
+            using var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true);
+            var core = zip.GetEntry("docProps/core.xml");
+            if (core is null)
+            {
+                return null;
+            }
+
+            using var stream = core.Open();
+            var modified = XDocument.Load(stream).Descendants(DcTerms + "modified").FirstOrDefault();
+            return modified is not null && DateTimeOffset.TryParse(modified.Value, out var value)
+                ? value
+                : null;
+        }
+        catch (InvalidDataException)
+        {
+            return null; // not a valid zip / unreadable core props — fall back to mtime
+        }
+        finally
+        {
+            input.Position = origin;
+        }
     }
 }

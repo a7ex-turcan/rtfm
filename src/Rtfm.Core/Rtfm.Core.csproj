@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Rtfm.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.5.1" />
     <PackageReference Include="Mammoth" Version="1.11.0" />
     <PackageReference Include="MimeKit" Version="4.17.0" />

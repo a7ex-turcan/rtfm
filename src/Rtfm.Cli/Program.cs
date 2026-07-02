@@ -16,6 +16,12 @@ switch (args[0])
     case "chunk":
         return ChunkCommand.Run(args[1..]);
 
+    case "index":
+        return await IndexCommand.RunAsync(args[1..]);
+
+    case "search":
+        return await SearchCommand.RunAsync(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -31,6 +37,8 @@ static int PrintUsage()
           rtfm ping             Check connectivity to OpenSearch
           rtfm convert <path>   Convert one document to markdown (stdout)
           rtfm chunk <path>     Convert then show heading-aware chunks (stdout)
+          rtfm index <folder>   (Re)index a documentation folder into OpenSearch
+          rtfm search <query>   Tier 1 search over the index (stdout)
           rtfm --help           Show this help
 
         Environment:

@@ -22,10 +22,15 @@ public sealed class MhtmlConverter
 
         var conversion = _html.Convert(html);
 
+        // Confluence stamps the export time in the MIME Date header — a good
+        // recency proxy (§2.13 A). Absent → null, indexer falls back to mtime.
+        DateTimeOffset? modifiedAt = message.Headers.Contains(HeaderId.Date) ? message.Date : null;
+
         return new ConversionResult(
             SourcePath: sourcePath,
             Format: DocumentFormat.Mhtml,
             Markdown: conversion.Markdown,
-            Title: conversion.Title);
+            Title: conversion.Title,
+            SourceModifiedAt: modifiedAt);
     }
 }

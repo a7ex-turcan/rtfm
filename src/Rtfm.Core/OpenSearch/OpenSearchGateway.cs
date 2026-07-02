@@ -21,7 +21,7 @@ public sealed class OpenSearchGateway
         Endpoint = endpoint;
         var pool = new SingleNodeConnectionPool(endpoint);
         var config = new ConnectionConfiguration(pool)
-            .RequestTimeout(TimeSpan.FromSeconds(10));
+            .RequestTimeout(TimeSpan.FromSeconds(30));
         _client = new OpenSearchLowLevelClient(config);
     }
 
@@ -56,5 +56,95 @@ public sealed class OpenSearchGateway
             ClusterName: root.TryGetProperty("cluster_name", out var name) ? name.GetString() : null,
             NumberOfNodes: root.TryGetProperty("number_of_nodes", out var nodes) ? nodes.GetInt32() : null,
             Error: null);
+    }
+
+    /// <summary>True if the index exists.</summary>
+    public async Task<bool> IndexExistsAsync(string index, CancellationToken cancellationToken = default)
+    {
+        var response = await _client.Indices
+            .ExistsAsync<StringResponse>(index, ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        return response.HttpStatusCode == 200;
+    }
+
+    /// <summary>Creates the index with the given settings + mapping JSON if it does not exist. Returns true if created.</summary>
+    public async Task<bool> EnsureIndexAsync(string index, string definitionJson, CancellationToken cancellationToken = default)
+    {
+        if (await IndexExistsAsync(index, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        var response = await _client.Indices
+            .CreateAsync<StringResponse>(index, PostData.String(definitionJson), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"create index '{index}'");
+        return true;
+    }
+
+    /// <summary>Deletes all documents whose exact <paramref name="field"/> equals <paramref name="value"/> (§2.9).</summary>
+    public async Task DeleteByTermAsync(string index, string field, string value, CancellationToken cancellationToken = default)
+    {
+        var query = new { query = new { term = new Dictionary<string, string> { [field] = value } } };
+        var body = JsonSerializer.Serialize(query);
+        var response = await _client
+            .DeleteByQueryAsync<StringResponse>(index, PostData.String(body), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"delete_by_query on {index}.{field}");
+    }
+
+    /// <summary>Sends a pre-built NDJSON <c>_bulk</c> payload and throws if any item failed.</summary>
+    public async Task BulkAsync(string ndjson, CancellationToken cancellationToken = default)
+    {
+        var response = await _client
+            .BulkAsync<StringResponse>(PostData.String(ndjson), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, "bulk index");
+
+        using var doc = JsonDocument.Parse(response.Body);
+        if (doc.RootElement.TryGetProperty("errors", out var errors) && errors.GetBoolean())
+        {
+            var firstError = doc.RootElement.GetProperty("items").EnumerateArray()
+                .SelectMany(item => item.EnumerateObject())
+                .Where(op => op.Value.TryGetProperty("error", out _))
+                .Select(op => op.Value.GetProperty("error").ToString())
+                .FirstOrDefault();
+
+            throw new InvalidOperationException($"Bulk index reported errors: {firstError}");
+        }
+    }
+
+    /// <summary>Makes recent writes visible to search (call after index/delete).</summary>
+    public async Task RefreshAsync(string index, CancellationToken cancellationToken = default)
+    {
+        var response = await _client.Indices
+            .RefreshAsync<StringResponse>(index, ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"refresh index '{index}'");
+    }
+
+    /// <summary>Runs a raw query body and returns the raw JSON response.</summary>
+    public async Task<string> SearchAsync(string index, string queryJson, CancellationToken cancellationToken = default)
+    {
+        var response = await _client
+            .SearchAsync<StringResponse>(index, PostData.String(queryJson), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"search '{index}'");
+        return response.Body;
+    }
+
+    private static void EnsureSuccess(StringResponse response, string operation)
+    {
+        if (!response.Success)
+        {
+            var detail = response.OriginalException?.Message ?? response.Body ?? response.DebugInformation;
+            throw new InvalidOperationException($"OpenSearch {operation} failed: {detail}");
+        }
     }
 }
