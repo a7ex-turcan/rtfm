@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rtfm": {
+      "command": "dotnet",
+      "args": ["src/Rtfm.Mcp/bin/Release/net10.0/Rtfm.Mcp.dll"],
+      "env": {
+        "RTFM_OPENSEARCH_URL": "http://localhost:9200",
+        "RTFM_PROJECT": "pam"
+      }
+    }
+  }
+}

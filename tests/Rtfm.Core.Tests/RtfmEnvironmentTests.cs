@@ -39,4 +39,31 @@ public class RtfmEnvironmentTests
             Environment.SetEnvironmentVariable(RtfmEnvironment.OpenSearchUrlVariable, original);
         }
     }
+
+    [Theory]
+    [InlineData("payments", "payments")]  // explicit request wins
+    [InlineData("*", null)]               // "all" sentinel → no filter
+    [InlineData("all", null)]
+    public void ResolveProjectScope_HonoursTheRequestedValue(string requested, string? expected)
+    {
+        Assert.Equal(expected, RtfmEnvironment.ResolveProjectScope(requested));
+    }
+
+    [Fact]
+    public void ResolveProjectScope_FallsBackToEnv_ThenToAllProjects()
+    {
+        var original = Environment.GetEnvironmentVariable(RtfmEnvironment.ProjectVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(RtfmEnvironment.ProjectVariable, "billing");
+            Assert.Equal("billing", RtfmEnvironment.ResolveProjectScope());
+
+            Environment.SetEnvironmentVariable(RtfmEnvironment.ProjectVariable, null);
+            Assert.Null(RtfmEnvironment.ResolveProjectScope());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(RtfmEnvironment.ProjectVariable, original);
+        }
+    }
 }
