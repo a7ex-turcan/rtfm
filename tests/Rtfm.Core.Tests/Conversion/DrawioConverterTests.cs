@@ -93,6 +93,38 @@ public class DrawioConverterTests
     }
 
     [Fact]
+    public void UserObject_wrapped_cells_inherit_label_and_id_from_the_wrapper()
+    {
+        // The Mermaid-import style seen in the real corpus: the UserObject owns
+        // the id and the label; the mxCell inside owns neither.
+        var xml = """
+            <mxfile><diagram name="ER"><mxGraphModel><root>
+              <mxCell id="0" /><mxCell id="1" parent="0" />
+              <UserObject label="Party" mermaidId="n:Party" id="v_t1">
+                <mxCell style="shape=table;container=1;" vertex="1" parent="1" />
+              </UserObject>
+              <mxCell id="v_r1" style="shape=tableRow;" vertex="1" parent="v_t1" />
+              <mxCell id="v_r1a" value="string" vertex="1" parent="v_r1" />
+              <mxCell id="v_r1b" value="PartyId" vertex="1" parent="v_r1" />
+              <mxCell id="v_r1c" value="PK" vertex="1" parent="v_r1" />
+              <UserObject label="Tenant" id="v_t2">
+                <mxCell style="shape=table;container=1;" vertex="1" parent="1" />
+              </UserObject>
+              <UserObject label="&quot;belongs-to&quot;" id="e_1">
+                <mxCell edge="1" parent="1" source="v_t2" target="v_t1" />
+              </UserObject>
+            </root></mxGraphModel></diagram></mxfile>
+            """;
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+
+        var result = new DrawioConverter().Convert(stream, "er.drawio");
+
+        Assert.Contains("**Party** — string PartyId PK", result.Markdown);
+        Assert.Contains("Tenant", result.Markdown);
+        Assert.Contains("Tenant → Party: \"belongs-to\"", result.Markdown);
+    }
+
+    [Fact]
     public void Detector_recognizes_mxfile_content_and_drawio_extension()
     {
         using var byContent = new MemoryStream(Encoding.UTF8.GetBytes("<mxfile host=\"app.diagrams.net\"><diagram/></mxfile>"));

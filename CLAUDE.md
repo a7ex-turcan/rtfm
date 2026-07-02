@@ -902,9 +902,22 @@ schema/deployment diagram indexed as 4 breadcrumbed chunks; "which tables
 reference the accounts table" hits the Schema>Shapes chunk **#1**. Caveat
 noted: the cross-encoder's *absolute* scores run low on symbol-dense diagram
 notation, but relative ranking holds. Fixture tests cover the compressed
-round-trip (encoded exactly as draw.io does). 117/117 tests. **Out of scope
-for now:** `.drawio.png`/`.drawio.svg` (XML embedded in image containers) —
-add if the real corpus contains them.
+round-trip (encoded exactly as draw.io does). **Out of scope for now:**
+`.drawio.png`/`.drawio.svg` (XML embedded in image containers) — add if the
+real corpus contains them.
+
+**Real-corpus finding (same day):** production diagrams (Mermaid-imported ER
+models) wrap shapes in `<UserObject label=… id=…><mxCell …/></UserObject>` —
+the *wrapper* owns the id and label, the inner `mxCell` owns neither, so every
+entity converted nameless. Fix: mxCells inherit missing id/label from a
+`UserObject`/`object` wrapper parent. After the fix the two real diagrams
+extract fully (24-entity identity/tenancy data model with names, columns, PK/FK
+markers, and 38 labeled relations like `PartyOrganisation → Tenant: "is
+tenant"`). Validated: "which tables reference the Tenant table" answers from
+the diagram at #1. Known limit: an entity buried in a large all-entities
+Shapes chunk can lose to prose docs on vague queries (the symbol-density
+caveat in practice) — revisit per-entity chunk granularity if it bites.
+118/118 tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

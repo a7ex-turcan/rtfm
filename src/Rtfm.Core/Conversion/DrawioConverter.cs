@@ -97,16 +97,23 @@ public sealed class DrawioConverter
 
     private static void RenderPage(StringBuilder sb, XElement model)
     {
+        // Shapes with metadata (links, Mermaid imports, custom attributes) are
+        // wrapped: <UserObject id label><mxCell …/></UserObject> (or <object>).
+        // The wrapper owns the id and the label; the mxCell inherits both.
         var cells = model.Descendants("mxCell")
-            .Select(e => new Cell(
-                Id: e.Attribute("id")?.Value ?? string.Empty,
-                Label: CleanLabel(e.Attribute("value")?.Value),
-                Style: e.Attribute("style")?.Value ?? string.Empty,
-                Parent: e.Attribute("parent")?.Value,
-                IsVertex: e.Attribute("vertex")?.Value == "1",
-                IsEdge: e.Attribute("edge")?.Value == "1",
-                Source: e.Attribute("source")?.Value,
-                Target: e.Attribute("target")?.Value))
+            .Select(e =>
+            {
+                var wrapper = e.Parent is { } p && (p.Name.LocalName is "UserObject" or "object") ? p : null;
+                return new Cell(
+                    Id: e.Attribute("id")?.Value ?? wrapper?.Attribute("id")?.Value ?? string.Empty,
+                    Label: CleanLabel(e.Attribute("value")?.Value ?? wrapper?.Attribute("label")?.Value),
+                    Style: e.Attribute("style")?.Value ?? string.Empty,
+                    Parent: e.Attribute("parent")?.Value,
+                    IsVertex: e.Attribute("vertex")?.Value == "1",
+                    IsEdge: e.Attribute("edge")?.Value == "1",
+                    Source: e.Attribute("source")?.Value,
+                    Target: e.Attribute("target")?.Value);
+            })
             .Where(c => c.Id.Length > 0)
             .ToList();
 
