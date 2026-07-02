@@ -34,6 +34,17 @@ public static class FormatDetector
             return SourceFormat.Pdf;
         }
 
+        // PNG: \x89PNG.  JPEG: FF D8 FF.
+        if (read >= 4 && head[0] == 0x89 && head[1] == 0x50 && head[2] == 0x4E && head[3] == 0x47)
+        {
+            return SourceFormat.Image;
+        }
+
+        if (read >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF)
+        {
+            return SourceFormat.Image;
+        }
+
         // OOXML (docx *and* xlsx) is a zip archive: "PK\x03\x04".
         if (read >= 4 && head[0] == 0x50 && head[1] == 0x4B && head[2] == 0x03 && head[3] == 0x04)
         {

@@ -29,4 +29,7 @@ public enum SourceFormat
 
     /// <summary>draw.io diagram (mxfile XML, .drawio). Phase 15.</summary>
     Drawio,
+
+    /// <summary>Standalone PNG/JPEG image, OCR'd (Phase 17).</summary>
+    Image,
 }

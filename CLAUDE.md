@@ -384,7 +384,7 @@ project" reuses delete-by-query (§2.9).
 | xlsx → markdown (Phase 9) | `ClosedXML` (sheet sections + pipe tables) |
 | CSV → markdown (Phase 9) | none — small built-in RFC 4180-ish parser |
 | draw.io → markdown (Phase 15) | none — XLinq + DeflateStream (+ AngleSharp for labels) |
-| OCR for PDF-embedded images (Phase 16) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
+| OCR for PDF-embedded images (Phase 16) + standalone images (Phase 17) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -949,6 +949,26 @@ live end-to-end — a PDF whose retention policy existed only as pixels answers
 "how are alerts escalated and what is the retention" at **#1 (1.00)**.
 Notably, OCR'd prose scores *well* on the cross-encoder (unlike drawio symbol
 notation). 120/120 tests.
+
+### Phase 17 — Standalone images (.png/.jpg/.jpeg) ✅ **Done**
+The Phase 16 OCR engine, given a front door: architecture screenshots,
+exported diagram bitmaps, and photographed whiteboards become indexable
+documents.
+**Done when:** a PNG whose knowledge exists only as pixels indexes and answers
+a question about its content.
+
+*Delivered:* the OCR engine extracted from `PdfConverter` into a shared
+internal `OcrEngine` (one lazy instance per process, used by both routes), and
+a small `ImageConverter`: filename stem as title + `[Image text] …` body; a
+textless image still yields its title line so it stays visible in
+`list_sources`. Detection by magic bytes (`\x89PNG`, `FF D8 FF` — content wins
+over extension); `.png`/`.jpg`/`.jpeg` gate discovery. Pleasant side effect:
+`.drawio.png` exports — previously skipped entirely — now index via OCR of the
+rendered image (labels only; the true XML route remains the better path when
+the plain `.drawio` exists). Verified live: a runbook screenshot OCR'd
+character-perfect (including the CLI command `rtctl vip rotate --cluster eu`)
+and "how do I rotate the VIP during failover" answers at #1 (1.00). 124/124
+tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

@@ -1,7 +1,5 @@
 using System.Globalization;
 using System.Text;
-using Microsoft.ML.OnnxRuntime;
-using RapidOcrNet;
 using SkiaSharp;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
@@ -173,47 +171,11 @@ public sealed class PdfConverter
 
     private const int MaxImagesPerPage = 8;
 
-    /// <summary>
-    /// One shared OCR engine per process (models load once, ~15 MB). Ships
-    /// inside the RapidOcrNet package — no download, no network. Null when the
-    /// model files aren't next to the binary (never expected; OCR is then
-    /// skipped rather than failing conversion).
-    /// </summary>
-    private static readonly Lazy<RapidOcr?> OcrEngine = new(CreateOcrEngine, LazyThreadSafetyMode.ExecutionAndPublication);
-
-    private static RapidOcr? CreateOcrEngine()
-    {
-        try
-        {
-            // Explicit absolute paths: the package's own default resolves
-            // relative to the *working directory*, which for rtfm is wherever
-            // the user happens to stand.
-            var dir = Path.Combine(AppContext.BaseDirectory, "models", "v5");
-            var ocr = new RapidOcr();
-            ocr.InitModels(
-                Path.Combine(dir, "ch_PP-OCRv5_mobile_det.onnx"),
-                Path.Combine(dir, "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
-                Path.Combine(dir, "latin_PP-OCRv5_rec_mobile_infer.onnx"),
-                Path.Combine(dir, "ppocrv5_latin_dict.txt"),
-                new SessionOptions());
-            return ocr;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static IReadOnlyList<string> ExtractImageTexts(Page page)
     {
         var texts = new List<string>();
-        var ocr = OcrEngine.Value;
-        if (ocr is null)
-        {
-            return texts;
-        }
-
         var used = 0;
+
         foreach (var image in page.GetImages())
         {
             if (used >= MaxImagesPerPage)
@@ -235,9 +197,7 @@ public sealed class PdfConverter
                 }
 
                 used++;
-                var result = ocr.Detect(bitmap, RapidOcrOptions.Default);
-                var text = result.StrRes?.Trim();
-                if (!string.IsNullOrWhiteSpace(text))
+                if (OcrEngine.DetectText(bitmap) is { } text)
                 {
                     texts.Add(text);
                 }
