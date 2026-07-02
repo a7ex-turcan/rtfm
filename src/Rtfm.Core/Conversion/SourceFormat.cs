@@ -5,7 +5,7 @@ namespace Rtfm.Core.Conversion;
 /// not just the file extension — Confluence "Export to Word" files carry a
 /// <c>.doc</c> extension but are actually MHTML (see <see cref="FormatDetector"/>).
 /// </summary>
-public enum DocumentFormat
+public enum SourceFormat
 {
     Unknown = 0,
 
@@ -17,4 +17,13 @@ public enum DocumentFormat
 
     /// <summary>Plain Markdown (.md). Phase 1c.</summary>
     Markdown,
+
+    /// <summary>PDF (%PDF magic). Phase 9.</summary>
+    Pdf,
+
+    /// <summary>Excel / Open XML workbook (.xlsx — zip with an xl/ folder). Phase 9.</summary>
+    Xlsx,
+
+    /// <summary>Comma-separated values (.csv, by extension). Phase 9.</summary>
+    Csv,
 }

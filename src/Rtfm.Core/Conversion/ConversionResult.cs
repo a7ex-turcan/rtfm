@@ -9,7 +9,7 @@ namespace Rtfm.Core.Conversion;
 /// </summary>
 public sealed record ConversionResult(
     string SourcePath,
-    DocumentFormat Format,
+    SourceFormat Format,
     string Markdown,
     string? Title,
     DateTimeOffset? SourceModifiedAt = null);

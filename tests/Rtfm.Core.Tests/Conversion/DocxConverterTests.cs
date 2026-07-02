@@ -12,7 +12,7 @@ public class DocxConverterTests
         using var docx = BuildMinimalDocx();
         var result = new DocumentConverter().Convert(docx, "sample.docx");
 
-        Assert.Equal(DocumentFormat.Docx, result.Format);
+        Assert.Equal(SourceFormat.Docx, result.Format);
         Assert.Contains("# Doc Title", result.Markdown);   // Heading 1 style → h1 → #
         Assert.Contains("Hello world.", result.Markdown);
         Assert.Equal("Doc Title", result.Title);

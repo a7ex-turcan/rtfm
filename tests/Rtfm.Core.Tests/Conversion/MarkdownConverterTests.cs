@@ -16,7 +16,7 @@ public class MarkdownConverterTests
     {
         var result = Convert("# My Notes\n\nSome body text.\n");
 
-        Assert.Equal(DocumentFormat.Markdown, result.Format);
+        Assert.Equal(SourceFormat.Markdown, result.Format);
         Assert.Equal("My Notes", result.Title);
         Assert.Contains("# My Notes", result.Markdown);
         Assert.Contains("Some body text.", result.Markdown);

@@ -28,7 +28,7 @@ public sealed class MhtmlConverter
 
         return new ConversionResult(
             SourcePath: sourcePath,
-            Format: DocumentFormat.Mhtml,
+            Format: SourceFormat.Mhtml,
             Markdown: conversion.Markdown,
             Title: conversion.Title,
             SourceModifiedAt: modifiedAt);

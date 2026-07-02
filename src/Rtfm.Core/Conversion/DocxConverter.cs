@@ -30,7 +30,7 @@ public sealed class DocxConverter
 
         return new ConversionResult(
             SourcePath: sourcePath,
-            Format: DocumentFormat.Docx,
+            Format: SourceFormat.Docx,
             Markdown: conversion.Markdown,
             Title: conversion.Title,
             SourceModifiedAt: modifiedAt);

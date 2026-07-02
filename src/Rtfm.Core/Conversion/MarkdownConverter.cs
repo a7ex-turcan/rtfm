@@ -22,7 +22,7 @@ public sealed class MarkdownConverter
         text = BlankLines.Replace(text, "\n\n").Trim();
 
         var title = ExtractTitle(text);
-        return new ConversionResult(sourcePath, DocumentFormat.Markdown, text, title);
+        return new ConversionResult(sourcePath, SourceFormat.Markdown, text, title);
     }
 
     private static string? ExtractTitle(string markdown)

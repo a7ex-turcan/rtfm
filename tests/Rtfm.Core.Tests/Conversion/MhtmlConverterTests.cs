@@ -41,7 +41,7 @@ public class MhtmlConverterTests
     public void Detects_mhtml_by_content_despite_doc_extension()
     {
         using var stream = new MemoryStream(Encoding.ASCII.GetBytes(SampleMhtml));
-        Assert.Equal(DocumentFormat.Mhtml, FormatDetector.Detect("sample.doc", stream));
+        Assert.Equal(SourceFormat.Mhtml, FormatDetector.Detect("sample.doc", stream));
         // Detection must not consume the stream.
         Assert.Equal(0, stream.Position);
     }
@@ -51,7 +51,7 @@ public class MhtmlConverterTests
     {
         var result = Convert();
 
-        Assert.Equal(DocumentFormat.Mhtml, result.Format);
+        Assert.Equal(SourceFormat.Mhtml, result.Format);
         Assert.Equal("Doc Title", result.Title);
         Assert.Contains("# Doc Title", result.Markdown);
         Assert.Contains("## Section", result.Markdown);

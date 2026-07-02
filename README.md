@@ -3,7 +3,8 @@
 **R**etrieval **T**ool **F**or **M**anuals — a local, per-developer documentation
 search tool for your LLM.
 
-RTFM indexes a folder of Confluence-exported `.docx` documentation into a local
+RTFM indexes a folder of documentation — Confluence exports, Word, Markdown,
+PDF, Excel, CSV — into a local
 [OpenSearch](https://opensearch.org/) instance and exposes it to any MCP-capable
 LLM client (Claude Code, Claude Desktop, IDE integrations) over a stdio
 [Model Context Protocol](https://modelcontextprotocol.io/) server. Instead of
@@ -23,20 +24,20 @@ documents leaving your machine.
 ## How it works
 
 ```
-docs/ (.docx)  ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
-                convert · chunk        rtfm-docs        search_docs      client
-                · index                  index            (MCP)
+docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
+(.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
+ .pdf .xlsx .csv)   · index               index          + 3 more (MCP)
 ```
 
 Three independent processes, each with its own lifecycle:
 
 | Component  | What it is                          | Role                                          |
 |------------|-------------------------------------|-----------------------------------------------|
-| `rtfm`     | Console CLI                         | Converts `.docx` → markdown, chunks, indexes  |
+| `rtfm`     | Console CLI                         | Converts documents → markdown, chunks, indexes |
 | OpenSearch | Single-node container (Docker)      | Persistent search store (`rtfm-docs` index)   |
-| `rtfm-mcp` | stdio MCP server                    | Exposes `search_docs` to the LLM client       |
+| `rtfm-mcp` | stdio MCP server                    | Exposes `search_docs` & friends to the LLM client |
 
-The CLI converts each `.docx` (Mammoth → ReverseMarkdown), splits it into
+The CLI converts each document to markdown, splits it into
 heading-aware chunks with breadcrumb context, and bulk-indexes them. Retrieval
 is **hybrid**: a tuned BM25 lexical search (excellent for technical lookups)
 fused with local in-process semantic embeddings (all-MiniLM-L6-v2 via ONNX
@@ -90,8 +91,11 @@ dotnet run --project src/Rtfm.Cli -- watch ./docs
 | `rtfm chunk` | `<path>` | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs. |
 
 **Supported document formats** (detected by content, not extension): Confluence
-"Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`, and
-Markdown (`.md`/`.markdown`).
+"Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`,
+Markdown (`.md`/`.markdown`), PDF (headings inferred from font sizes — expect
+flatter structure than Word exports), Excel `.xlsx` (each sheet becomes a
+section with its data as a table), and CSV (one table, header row preserved
+across chunk splits).
 
 **Projects.** Every chunk is tagged with the `--project` it was indexed under
 (default `default`); search and the MCP server filter on it. A file belongs to

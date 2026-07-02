@@ -4,8 +4,9 @@
 > (The team knows what it really stands for. The README does not.)
 
 A local, per-developer documentation retrieval tool. It indexes a folder of
-documentation — Confluence MHTML exports (`.doc`), Word `.docx`, and plain
-Markdown (`.md`) — into a local OpenSearch instance and exposes it to any
+documentation — Confluence MHTML exports (`.doc`), Word `.docx`, plain
+Markdown (`.md`), and since Phase 9 PDF, Excel (`.xlsx`), and CSV — into a
+local OpenSearch instance and exposes it to any
 MCP-capable LLM client (Claude Code, Claude Desktop, IDE integrations) over a
 stdio MCP server. Instead of manually attaching docs to a chat, a developer asks
 their LLM and it retrieves the relevant passages itself.
@@ -112,8 +113,9 @@ No live pipeline / CDC / TTL machinery. See §2.8 for watch-mode specifics.
 
 ### 2.5 Conversion: in-process, multi-format → markdown
 **Decision: convert everything in-process — no Pandoc, no native binary, no
-PATH problems for per-dev distribution.** Three input formats are supported,
-delivered in this order:
+PATH problems for per-dev distribution.** Three input formats shipped first
+(in this order; Phase 9 later added PDF, xlsx, and CSV as additional
+front ends into the same tail):
 
 1. **MHTML** (`.doc`) — Confluence's "Export to Word" output. *Despite the
    `.doc` extension these are **not** Word files at all: they are MIME
@@ -369,6 +371,9 @@ project" reuses delete-by-query (§2.9).
 | HTML DOM / boilerplate strip | `AngleSharp` |
 | HTML → markdown | `ReverseMarkdown` |
 | Markdown (`.md`) input | none — passthrough |
+| PDF → markdown (Phase 9) | `PdfPig` (heading heuristics by font size) |
+| xlsx → markdown (Phase 9) | `ClosedXML` (sheet sections + pipe tables) |
+| CSV → markdown (Phase 9) | none — small built-in RFC 4180-ish parser |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -385,7 +390,9 @@ project" reuses delete-by-query (§2.9).
 > `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
 > **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +
 > `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). `Spectre.Console` **0.57.1**
-> (Phase 7). Bump deliberately, not automatically.
+> (Phase 7). `PdfPig` **0.1.15** (NuGet ID `PdfPig`, *not* the stale
+> `UglyToad.PdfPig`) + `ClosedXML` **0.105.0** (Phase 9). Bump deliberately,
+> not automatically.
 
 ---
 
@@ -670,7 +677,7 @@ reassembles 25 chunks (~22 K chars, title first); **`find_similar` on the RBAC
 doc ranks the ABAC doc #1 (0.60)** — the acceptance criterion. 59/59 tests.
 In-Claude-Code confirmation needs the usual restart to reload the server.
 
-### Phase 9 — Format expansion: PDF, Excel, CSV
+### Phase 9 — Format expansion: PDF, Excel, CSV ✅ **Done**
 Widen §2.5's converter fan-in; the shared tail (strip → markdown → chunk) stays
 untouched, so each format is only a new front end + detection rule.
 - **PDF** — candidate: `UglyToad.PdfPig` (pure managed, MIT). Detect by `%PDF`
@@ -690,6 +697,28 @@ Pin exact package versions at build time, per §3.
 **Done when:** a representative PDF, a multi-sheet workbook, and a CSV each
 index and answer a lookup question about their own content; existing formats
 unregressed.
+
+*Delivered:* `PdfConverter` (PdfPig — **NuGet ID is `PdfPig`,** the
+`UglyToad.PdfPig` ID is stale/unlisted), `XlsxConverter` (ClosedXML),
+`CsvConverter` (hand-rolled RFC 4180-ish parser + comma/semicolon/tab sniff, no
+dependency). `FormatDetector` gained `%PDF` magic, `.csv` extension, and the
+zip disambiguation (`xl/` vs `word/` container folders; unreadable/markerless
+zips default to docx, the historic behavior). PDF headings are heuristic as
+planned: ½pt-bucketed letter sizes, word-count-weighted median = body, short
+larger (or bold-at-body) lines become headings, distinct sizes → #/##/###;
+paragraphs split on >1.6× typical baseline gap; embedded `D:yyyymmdd…` dates
+parsed for `source_modified_at` (xlsx uses workbook `Properties.Modified`; CSV
+has none → mtime). Sheets render as `# workbook` + `## sheet` + pipe table, so
+breadcrumbs come out `workbook > sheet`. **Rename:** the `DocumentFormat` enum
+became `SourceFormat` — ClosedXML drags in the `DocumentFormat.OpenXml`
+package, whose root namespace shadows the enum everywhere (and it's also our
+documented docx-tables fallback dep, so the collision was permanent). Unit
+tests build fixtures in-memory (PdfPig's `PdfDocumentBuilder`, ClosedXML
+workbooks). Verified live: handbook.pdf / infrastructure.xlsx / oncall.csv
+indexed under a smoke project — "how many vacation days" → `Team Handbook >
+Vacation Policy` (PDF, 1.00), "gamma-cache port" → `infrastructure > Servers`
+(xlsx), "who is on call in week 2026-W28" → the roster row (CSV); pam corpus
+re-indexed to the same 111 chunks with its top hits intact. 81/81 tests.
 
 ### Phase 10 — Observability: `rtfm status` + staleness
 The index is a black box unless you curl OpenSearch. One read-only command:
