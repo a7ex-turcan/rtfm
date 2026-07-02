@@ -48,6 +48,12 @@ public static class FormatDetector
             return SourceFormat.Mhtml;
         }
 
+        // draw.io: an mxfile XML root (content wins — covers .xml files too).
+        if (text.Contains("<mxfile", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Drawio;
+        }
+
         var ext = Path.GetExtension(path);
         if (ext.Equals(".md", StringComparison.OrdinalIgnoreCase)
             || ext.Equals(".markdown", StringComparison.OrdinalIgnoreCase))
@@ -58,6 +64,11 @@ public static class FormatDetector
         if (ext.Equals(".csv", StringComparison.OrdinalIgnoreCase))
         {
             return SourceFormat.Csv;
+        }
+
+        if (ext.Equals(".drawio", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Drawio;
         }
 
         return SourceFormat.Unknown;

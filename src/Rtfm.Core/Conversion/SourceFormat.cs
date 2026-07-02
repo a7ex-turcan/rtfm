@@ -26,4 +26,7 @@ public enum SourceFormat
 
     /// <summary>Comma-separated values (.csv, by extension). Phase 9.</summary>
     Csv,
+
+    /// <summary>draw.io diagram (mxfile XML, .drawio). Phase 15.</summary>
+    Drawio,
 }

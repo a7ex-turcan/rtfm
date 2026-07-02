@@ -13,6 +13,7 @@ public sealed class DocumentConverter
     private readonly PdfConverter _pdf = new();
     private readonly XlsxConverter _xlsx = new();
     private readonly CsvConverter _csv = new();
+    private readonly DrawioConverter _drawio = new();
 
     /// <summary>Converts the file at <paramref name="path"/> to markdown.</summary>
     public ConversionResult Convert(string path)
@@ -37,6 +38,7 @@ public sealed class DocumentConverter
             SourceFormat.Pdf => _pdf.Convert(stream, path),
             SourceFormat.Xlsx => _xlsx.Convert(stream, path),
             SourceFormat.Csv => _csv.Convert(stream, path),
+            SourceFormat.Drawio => _drawio.Convert(stream, path),
             _ => throw new NotSupportedException(
                 $"Unrecognized document format: {path}"),
         };

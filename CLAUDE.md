@@ -5,7 +5,7 @@
 
 A local, per-developer documentation retrieval tool. It indexes a folder of
 documentation — Confluence MHTML exports (`.doc`), Word `.docx`, plain
-Markdown (`.md`), and since Phase 9 PDF, Excel (`.xlsx`), and CSV — into a
+Markdown (`.md`), PDF, Excel (`.xlsx`), CSV, and draw.io diagrams — into a
 local OpenSearch instance and exposes it to any
 MCP-capable LLM client (Claude Code, Claude Desktop, IDE integrations) over a
 stdio MCP server. Instead of manually attaching docs to a chat, a developer asks
@@ -383,6 +383,7 @@ project" reuses delete-by-query (§2.9).
 | PDF → markdown (Phase 9) | `PdfPig` (heading heuristics by font size) |
 | xlsx → markdown (Phase 9) | `ClosedXML` (sheet sections + pipe tables) |
 | CSV → markdown (Phase 9) | none — small built-in RFC 4180-ish parser |
+| draw.io → markdown (Phase 15) | none — XLinq + DeflateStream (+ AngleSharp for labels) |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -878,6 +879,32 @@ earlier if a second user shows up before Phases 8–13 land.
 **Done when:** a machine without the repo can install both tools, run
 `docker compose up -d` + `rtfm index`, and wire the MCP server into Claude Code
 from the published artifact alone.
+
+### Phase 15 — draw.io diagrams ✅ **Done** *(built out of order — Phase 14 still open)*
+Diagrams carry knowledge (DB table relations, service topologies) that is
+invisible to text search — but draw.io files are XML *graphs*, not pictures,
+so the knowledge is extractable.
+**Done when:** an ER-style `.drawio` schema indexes and answers "which tables
+reference X" with the right page section.
+
+*Delivered:* `DrawioConverter` — a new §2.5 front end, no tail changes. Parses
+the `mxfile` per page (`<diagram>`), handling **both** page encodings: modern
+plain `mxGraphModel` children and the classic compressed payload (base64 → raw
+DEFLATE via `DeflateStream` → URI-decode). Each page renders as `## <page>`
+with **Shapes** (top-level vertices; containers inline their descendant labels,
+so an ER table reads `**accounts** — PK account_id; tenant_name`, rows merging
+their marker+name cells) and **Connections** (`A → B: label`, edge endpoints
+resolved by walking up to the nearest labeled ancestor — covers edges attached
+to table *rows*). Labels are HTML fragments → stripped via AngleSharp; `mxfile
+modified` attr → `source_modified_at`. Detection: `<mxfile` content sniff
+(wins for `.xml` files too) + `.drawio` extension. Verified live: a two-page
+schema/deployment diagram indexed as 4 breadcrumbed chunks; "which tables
+reference the accounts table" hits the Schema>Shapes chunk **#1**. Caveat
+noted: the cross-encoder's *absolute* scores run low on symbol-dense diagram
+notation, but relative ranking holds. Fixture tests cover the compressed
+round-trip (encoded exactly as draw.io does). 117/117 tests. **Out of scope
+for now:** `.drawio.png`/`.drawio.svg` (XML embedded in image containers) —
+add if the real corpus contains them.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

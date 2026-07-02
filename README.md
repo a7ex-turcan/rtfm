@@ -4,7 +4,7 @@
 search tool for your LLM.
 
 RTFM indexes a folder of documentation — Confluence exports, Word, Markdown,
-PDF, Excel, CSV — into a local
+PDF, Excel, CSV, draw.io diagrams — into a local
 [OpenSearch](https://opensearch.org/) instance and exposes it to any MCP-capable
 LLM client (Claude Code, Claude Desktop, IDE integrations) over a stdio
 [Model Context Protocol](https://modelcontextprotocol.io/) server. Instead of
@@ -26,7 +26,8 @@ documents leaving your machine.
 ```
 docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
 (.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
- .pdf .xlsx .csv)   · index               index          + 3 more (MCP)
+ .pdf .xlsx .csv    · index               index          + 7 more (MCP)
+ .drawio)
 ```
 
 Three independent processes, each with its own lifecycle:
@@ -225,8 +226,11 @@ that repo's `.mcp.json` instead of relying on either variable.
 "Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`,
 Markdown (`.md`/`.markdown`), PDF (headings inferred from font sizes — expect
 flatter structure than Word exports), Excel `.xlsx` (each sheet becomes a
-section with its data as a table), and CSV (one table, header row preserved
-across chunk splits).
+section with its data as a table), CSV (one table, header row preserved
+across chunk splits), and draw.io `.drawio` diagrams (each page becomes a
+section listing its shapes — ER tables with their columns — and its
+connections as `A → B` relations, so "which tables reference X" is answerable
+from a diagram; both plain and compressed pages supported).
 
 **Projects.** Every chunk is tagged with the `--project` it was indexed under
 (default `default`); search and the MCP server filter on it. A file belongs to
