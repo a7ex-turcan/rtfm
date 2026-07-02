@@ -261,12 +261,12 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-The tool surface is now five tools: `search_docs`, the Phase 8 additions —
+The tool surface is now eight tools: `search_docs`; the Phase 8 additions —
 `get_document(path, project?)` (full reassembled page), `list_sources(project?)`
 (corpus awareness), `find_similar(path, top_k?, project?)` (related docs via
-chunk-vector centroid) — and `list_contradictions(project?, top_k?)` (Phase 12
-nominations). Still scheduled: correction tools (Phase 13) — don't build ahead
-of their phase.
+chunk-vector centroid); `list_contradictions(project?, top_k?)` (Phase 12
+nominations); and the Phase 13 correction tools — `add_note` (human-confirmed
+only), `list_notes`, `remove_note`.
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -320,16 +320,18 @@ Shipped in layers — **A + B are committed; C is deferred**.
   strong heuristic, not a law (a new doc may be a scoped draft), so B *flags*,
   it does not overwrite.
 
-- **(C) Agent-driven correction / supersession — deferred, needs a decision.**
-  Letting the agent write user-confirmed truth back (`supersede` / `annotate`
-  MCP tools, human-in-the-loop) collides with the derived-index model: a direct
-  edit to OpenSearch is clobbered on the next re-index (§2.9 delete-by-query +
-  reindex). Corrections must live somewhere that survives reindex. Options to
-  decide when we build it: (1) write back to the **source document** (cleanest
-  truth model, awkward to edit MHTML/docx in place); (2) a separate
-  **overrides/annotations index** merged at query time (keeps the main index
-  derived; more machinery); (3) edit the chunk in place — simple but wiped on
-  re-index, a trap. Not built yet.
+- **(C) Agent-driven correction / supersession — RESOLVED (Phase 13): option 2,
+  the overrides index.** Option 1 (write back to source) fell to a decisive
+  observation: the "source" on disk is itself an *export* — the real source is
+  Confluence, which we can't write, so source-corrections would be clobbered by
+  the next export anyway. Option 3 remains the documented trap. Built as the
+  `rtfm-notes` index: user-confirmed **override notes** (text, project,
+  optional anchor path, author, timestamp, embedded vector), merged into
+  retrieval at query time — matching notes join the candidate pool as
+  attributed `origin: "note"` hits, and notes anchored to a document ride
+  along as annotations on that document's hits. Human-in-the-loop: the agent
+  proposes, the user confirms, only then `add_note`. Never auto-resolved,
+  never masquerading as source text.
 
 - **Proactive contradiction detection is a Tier-2 add-on.** Comparing a newly
   ingested chunk against *similar* existing chunks from other documents needs
@@ -830,7 +832,7 @@ nominations across pam's 111 chunks, both Confluence *template boilerplate*
 (shared "Document Owners"/"PRD Approval" tables) — the anticipated noise mode,
 absorbed by LLM-judges-at-read-time. 102/102 tests.
 
-### Phase 13 — Corrections that survive re-index (§2.13 C, decision + build)
+### Phase 13 — Corrections that survive re-index (§2.13 C, decision + build) ✅ **Done**
 When an agent + user confirm "the docs are wrong / outdated here", persist that
 knowledge. Leading option per §2.13 C: a separate **overrides index** (option 2)
 — keeps `rtfm-docs` purely derived (§2.9 delete-by-query stays safe), merged at
@@ -842,6 +844,29 @@ before any code.**
 **Done when:** a confirmed correction outranks/annotates the stale passage in
 `search_docs` results, survives a full re-index of the corpus, and is visibly
 attributed as an override (never silently masquerading as source text).
+
+*Delivered:* design pass resolved §2.13 C to **option 2** (see the updated
+§2.13 C for the reasoning — the killer argument against source write-back:
+exports get clobbered by the next export). `Rtfm.Core/Notes` — `NotesIndex`
+(`rtfm-notes`: `rtfm_technical` analyzer + 384-dim vector, mirroring the main
+index so notes match lexically and semantically), `Note`, `NotesStore`
+(add/list/remove/purge/search/find-anchored; note text embedded at add time,
+lexical-only fallback). Retrieval merge in `DocumentSearch`: matching notes
+(kNN floor **0.6** — deliberately looser than contradiction detection's 0.75
+because query→statement similarity runs structurally lower than
+statement→statement; a relevant note scored 0.67 in live validation) join the
+rerank pool as `origin:"note"` hits; without a reranker notes lead (no shared
+score scale across indexes); anchored notes attach to doc hits as
+`annotations`. All note failures degrade loudly, never failing the search.
+Surface: `rtfm note add|list|rm` (typing the command is the confirmation),
+`add_note`/`list_notes`/`remove_note` MCP tools (descriptions enforce the
+human-in-the-loop precondition: propose → explicit user yes → call), `rtfm
+purge` drops project notes, `search_docs` hits carry
+`origin`/`author`/`annotations` and its description teaches override
+semantics. Acceptance verified live: the confirmed correction ranks **#1 as ⚠
+OVERRIDE NOTE (attributed)** with the stale passage #2 carrying the
+annotation; a full corpus re-index changes nothing; purge removes the note.
+8 MCP tools advertised. 108/108 tests.
 
 ### Phase 14 — Packaging & distribution
 Adoption currently requires cloning the repo and building. Ship `rtfm` +

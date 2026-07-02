@@ -22,11 +22,15 @@ builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogL
 builder.Services.AddSingleton(_ => new OpenSearchGateway());
 builder.Services.AddSingleton<ITextEmbedder>(_ => new LocalEmbedder(new EmbeddingModelStore(log: Console.Error.WriteLine)));
 builder.Services.AddSingleton<IReranker>(_ => new CrossEncoder(EmbeddingModelStore.ForReranker(log: Console.Error.WriteLine)));
+builder.Services.AddSingleton(sp => new Rtfm.Core.Notes.NotesStore(
+    sp.GetRequiredService<OpenSearchGateway>(),
+    sp.GetRequiredService<ITextEmbedder>()));
 builder.Services.AddSingleton(sp => new DocumentSearch(
     sp.GetRequiredService<OpenSearchGateway>(),
     sp.GetRequiredService<ITextEmbedder>(),
     Console.Error.WriteLine,
-    sp.GetRequiredService<IReranker>()));
+    sp.GetRequiredService<IReranker>(),
+    sp.GetRequiredService<Rtfm.Core.Notes.NotesStore>()));
 builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
 builder.Services.AddSingleton(sp => new Rtfm.Core.Contradictions.ContradictionDetector(sp.GetRequiredService<OpenSearchGateway>()));
 

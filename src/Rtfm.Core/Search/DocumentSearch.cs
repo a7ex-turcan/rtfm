@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Rtfm.Core.Embeddings;
 using Rtfm.Core.Indexing;
+using Rtfm.Core.Notes;
 using Rtfm.Core.OpenSearch;
 
 namespace Rtfm.Core.Search;
@@ -16,7 +17,12 @@ namespace Rtfm.Core.Search;
 /// sigmoid-squashed scores. Every tier degrades loudly rather than failing the
 /// search: no embedder → BM25; no reranker → the fused order stands.
 /// </summary>
-public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? embedder = null, Action<string>? log = null, IReranker? reranker = null)
+public sealed class DocumentSearch(
+    OpenSearchGateway gateway,
+    ITextEmbedder? embedder = null,
+    Action<string>? log = null,
+    IReranker? reranker = null,
+    NotesStore? notes = null)
 {
     private readonly Action<string> _log = log ?? (_ => { });
     private bool _pipelineEnsured;
@@ -52,7 +58,12 @@ public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? emb
 
         var hits = ParseHits(json);
 
-        if (wantRerank && hits.Count > 1)
+        // Override notes (§2.13 C / Phase 13): matching notes join the pool as
+        // first-class, attributed candidates.
+        var noteHits = await TryGetNoteHitsAsync(query, vector, project, cancellationToken).ConfigureAwait(false);
+
+        IReadOnlyList<SearchHit> results;
+        if (wantRerank && hits.Count + noteHits.Count > 1)
         {
             try
             {
@@ -62,20 +73,107 @@ public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? emb
                 // scoring: split each candidate into overlapping windows (each
                 // re-carrying its breadcrumb), score all windows, and let a
                 // hit's best window speak for it.
-                var (windows, ownerHit) = BuildRerankWindows(hits);
+                var pool = hits.Concat(noteHits).ToList();
+                var (windows, ownerHit) = BuildRerankWindows(pool);
                 var windowScores = reranker!.Score(query, windows);
-                var best = MaxPerHit(windowScores, ownerHit, hits.Count);
-                return Rerank(hits, best, topK);
+                var best = MaxPerHit(windowScores, ownerHit, pool.Count);
+                results = Rerank(pool, best, topK);
             }
             catch (Exception ex)
             {
                 _rerankerBroken = true; // don't retry per query — a broken model stays broken
                 _log($"rtfm: reranking unavailable, keeping fused order: {ex.Message}");
+                results = MergeWithoutReranker(hits, noteHits, topK);
             }
         }
+        else
+        {
+            results = MergeWithoutReranker(hits, noteHits, topK);
+        }
 
-        return hits.Count > topK ? hits.Take(topK).ToList() : hits;
+        return await TryAnnotateAsync(results, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Without a reranker there is no shared score scale across the two
+    /// indexes — matching notes are few, human-confirmed, and query-relevant,
+    /// so they lead. Internal for tests.
+    /// </summary>
+    internal static IReadOnlyList<SearchHit> MergeWithoutReranker(
+        IReadOnlyList<SearchHit> docHits, IReadOnlyList<SearchHit> noteHits, int topK)
+        => noteHits.OrderByDescending(n => n.Score).Concat(docHits).Take(topK).ToList();
+
+    /// <summary>Matching override notes as searchable hits. Never fails the search.</summary>
+    private async Task<IReadOnlyList<SearchHit>> TryGetNoteHitsAsync(
+        string query, float[]? queryVector, string? project, CancellationToken cancellationToken)
+    {
+        if (notes is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            var matches = await notes.SearchAsync(query, queryVector, project, cancellationToken).ConfigureAwait(false);
+            return matches.Select(m => NoteToHit(m.Note, m.Score)).ToList();
+        }
+        catch (Exception ex)
+        {
+            _log($"rtfm: note lookup failed, continuing without overrides: {ex.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>An override note dressed as a hit — attributed, never masquerading as source text. Internal for tests.</summary>
+    internal static SearchHit NoteToHit(Note note, double score) => new(
+        Score: Math.Round(score, 4),
+        Project: note.Project,
+        SourcePath: $"note://{note.Id}",
+        HeadingPath: "Override note",
+        Title: null,
+        Content: note.Text,
+        SourceModifiedAt: note.CreatedAt,
+        Origin: "note",
+        Author: note.Author);
+
+    /// <summary>Attaches anchored notes to the doc hits whose source they correct (the "annotates" half).</summary>
+    private async Task<IReadOnlyList<SearchHit>> TryAnnotateAsync(IReadOnlyList<SearchHit> results, CancellationToken cancellationToken)
+    {
+        if (notes is null)
+        {
+            return results;
+        }
+
+        try
+        {
+            var paths = results.Where(h => h.Origin == "doc").Select(h => h.SourcePath).Distinct(StringComparer.Ordinal).ToList();
+            var anchored = await notes.FindAnchoredAsync(paths, cancellationToken).ConfigureAwait(false);
+            return anchored.Count == 0 ? results : Annotate(results, anchored);
+        }
+        catch (Exception ex)
+        {
+            _log($"rtfm: note annotation failed, returning hits unannotated: {ex.Message}");
+            return results;
+        }
+    }
+
+    /// <summary>Pure attach: a note annotates hits from the same project whose source path it targets. Internal for tests.</summary>
+    internal static IReadOnlyList<SearchHit> Annotate(IReadOnlyList<SearchHit> results, IReadOnlyList<Note> anchored)
+        => results.Select(hit =>
+        {
+            if (hit.Origin != "doc")
+            {
+                return hit;
+            }
+
+            var mine = anchored
+                .Where(n => string.Equals(n.TargetPath, hit.SourcePath, StringComparison.Ordinal)
+                    && string.Equals(n.Project, hit.Project, StringComparison.Ordinal))
+                .Select(n => new NoteAnnotation(n.Id, n.Text, n.Author, n.CreatedAt))
+                .ToList();
+
+            return mine.Count == 0 ? hit : hit with { Annotations = mine };
+        }).ToList();
 
     /// <summary>Window size in chars (≈250 wordpieces — near the passage length the reranker was trained on).</summary>
     private const int RerankWindowChars = 1000;

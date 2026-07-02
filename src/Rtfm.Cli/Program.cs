@@ -39,6 +39,9 @@ switch (args[0])
     case "contradictions":
         return await ContradictionsCommand.RunAsync(args[1..]);
 
+    case "note":
+        return await NoteCommand.RunAsync(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -101,6 +104,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
     commands.AddRow($"[{Ui.Accent}]status[/] [dim][[--project <name>]] [[--stale <days>]][/]", "Index health: projects, counts, vector coverage, staleness");
     commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project <name>]][/]", "Nominated doc-vs-doc disagreements within a project");
+    commands.AddRow($"[{Ui.Accent}]note[/] [dim]add <text>|list|rm <id> [[--project]] [[--doc <path>]][/]", "Override notes: corrections that survive re-indexing");
     commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");
     commands.AddRow($"[{Ui.Accent}]chunk[/] [dim]<path>[/]", "Convert then show heading-aware chunks (stdout)");

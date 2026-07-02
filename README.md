@@ -216,7 +216,8 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm search` | `<query...> [--project <name> \| --all]` | Hybrid search (BM25 + semantic kNN, fused). Top 5 hits as ranked cards with score bar, heading breadcrumb, source file, project, and last-modified date. No flag or `--all` spans all projects. |
 | `rtfm status` | `[--project <name>] [--stale <days>]` | Index health: environment (OpenSearch, embedding model cache, watch manifests) and per-project rollups — docs, chunks, vector coverage, source-date span, last index time. `--stale N` lists documents whose source date is older than N days (manual exports drift; age is the signal). |
 | `rtfm contradictions` | `[--project <name>]` | Nominated disagreements between documents of the same project: semantically-similar passages with different source dates and differing text (e.g. an old page says the default role is `admin`, a newer one `super-admin`). Nominations, not verdicts — read both sides before trusting either. |
-| `rtfm purge` | `<project> [--yes]` | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, and its contradiction pairs. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched. |
+| `rtfm note` | `add <text> [--project] [--doc <path>] \| list \| rm <id>` | Override notes: user-confirmed corrections that live outside the document index and **survive every re-index**. They surface in search as attributed ⚠ overrides and annotate the documents they correct — the original text stays retrievable. |
+| `rtfm purge` | `<project> [--yes]` | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched. |
 | `rtfm convert` | `<path>` | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling). |
 | `rtfm chunk` | `<path>` | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs. |
 
@@ -272,6 +273,8 @@ It exposes four tools:
 | `list_sources(project?)` | Every indexed doc with title, project, date, chunk count — corpus awareness ("do the docs even cover this?") |
 | `find_similar(path, top_k, project?)` | Semantically related documents, with the best-matching section as the "why" |
 | `list_contradictions(project?, top_k)` | Nominated doc-vs-doc disagreements within a project (newer vs older side, dates, excerpts) — the agent verifies and surfaces conflicts |
+| `add_note(text, project?, path?, author?)` | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first) |
+| `list_notes(project?)` / `remove_note(id)` | Review / delete override notes (removal only on explicit user request) |
 
 Scope for all tools is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or
 pass `project="*"` to search across all projects). Path arguments accept the

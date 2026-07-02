@@ -27,7 +27,8 @@ internal static class SearchCommand
         {
             using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
             using var reranker = await EmbedderProvider.TryCreateRerankerAsync().ConfigureAwait(false);
-            var search = new DocumentSearch(new OpenSearchGateway(), embedder, Console.Error.WriteLine, reranker);
+            var gateway = new OpenSearchGateway();
+            var search = new DocumentSearch(gateway, embedder, Console.Error.WriteLine, reranker, new Rtfm.Core.Notes.NotesStore(gateway, embedder));
 
             var hits = await Ui.Err.Status()
                 .Spinner(Spinner.Known.Dots)
@@ -47,9 +48,25 @@ internal static class SearchCommand
                 Ui.Out.Write(new Rule($"[bold]#{rank}[/]  {ScoreBar(hit.Score)} [dim]{hit.Score:F2}[/]")
                     .RuleStyle(new Style(Color.Grey))
                     .LeftJustified());
+
+                if (hit.Origin == "note")
+                {
+                    // Overrides are visibly attributed — never dressed as source text.
+                    Ui.Out.MarkupLine($"[bold yellow]⚠ OVERRIDE NOTE[/] [dim]· {Ui.E(hit.Author ?? "?")} · {Ui.E(modified)} · {Ui.E(hit.Project)}[/]");
+                    Ui.Out.WriteLine(snippet.ReplaceLineEndings(" "));
+                    Ui.Out.WriteLine();
+                    continue;
+                }
+
                 Ui.Out.MarkupLine($"[bold {Ui.Accent}]{Ui.E(hit.HeadingPath)}[/]");
                 Ui.Out.MarkupLine($"[dim]{Ui.E(Path.GetFileName(hit.SourcePath))} · {Ui.E(hit.Project)} · modified {Ui.E(modified)}[/]");
                 Ui.Out.WriteLine(snippet.ReplaceLineEndings(" "));
+
+                foreach (var note in hit.Annotations ?? [])
+                {
+                    Ui.Out.MarkupLine($"[yellow]⚠ override ({Ui.E(note.Author)}, {Ui.E(note.CreatedAt.ToString("yyyy-MM-dd"))}):[/] [italic]{Ui.E(note.Text)}[/]");
+                }
+
                 Ui.Out.WriteLine();
             }
 

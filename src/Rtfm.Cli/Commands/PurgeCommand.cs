@@ -79,11 +79,13 @@ internal static class PurgeCommand
 
         var removedManifests = ManifestStore.PurgeManifests(project);
         var removedPairs = await new Rtfm.Core.Contradictions.ContradictionDetector(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
+        var removedNotes = await new Rtfm.Core.Notes.NotesStore(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
 
         Ui.Err.MarkupLine(
             $"[green]Purged[/] project [{Ui.Accent}]{Ui.E(project)}[/]: "
             + $"[bold]{deleted}[/] chunks deleted, [bold]{removedManifests}[/] manifest{(removedManifests == 1 ? "" : "s")} removed, "
-            + $"[bold]{removedPairs}[/] contradiction pair{(removedPairs == 1 ? "" : "s")} dropped.");
+            + $"[bold]{removedPairs}[/] contradiction pair{(removedPairs == 1 ? "" : "s")} dropped, "
+            + $"[bold]{removedNotes}[/] note{(removedNotes == 1 ? "" : "s")} removed.");
         return 0;
     }
 

@@ -44,6 +44,11 @@ framing and the server silently fails to connect.
   nominated doc-vs-doc disagreements from `ContradictionDetector`; the
   description carries the read-both / prefer-newer / surface-the-conflict
   protocol (§2.13 B).
+- `add_note` / `list_notes` / `remove_note` (`NoteTools`, Phase 13) — override
+  notes backed by `NotesStore`. The `add_note`/`remove_note` descriptions
+  enforce the human-in-the-loop precondition (explicit user confirmation in
+  the conversation before calling) — keep that language intact; it is the
+  §2.13 C safety model.
 - Scope for every tool resolves through
   `RtfmEnvironment.ResolveProjectScope` (`RTFM_PROJECT` default, per-call
   override, `*`/`all` sentinel).

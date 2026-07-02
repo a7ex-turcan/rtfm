@@ -34,6 +34,11 @@ public static class SearchDocsTool
         - The corpus is manually exported and can drift from the live wiki: treat a very old
           source_modified_at with suspicion, and mention the date when an answer rests on dated material.
 
+        Overrides (origin "note"): hits with origin "note" are user-confirmed corrections that take
+        precedence over conflicting source text — still cite them as overrides with their author/date,
+        never as document content. A doc hit carrying `annotations` has confirmed corrections attached:
+        read them before trusting that passage.
+
         Follow-ups: each hit carries its `path` — pass it to get_document for the full page when the
         answer sprawls past the chunk, or to find_similar for related documents. list_sources shows
         what's indexed at all.
@@ -59,7 +64,10 @@ public static class SearchDocsTool
                 Path: h.SourcePath,
                 HeadingPath: h.HeadingPath,
                 SourceModifiedAt: h.SourceModifiedAt?.ToString("yyyy-MM-dd"),
-                Text: h.Content)).ToList());
+                Text: h.Content,
+                Origin: h.Origin,
+                Author: h.Author,
+                Annotations: h.Annotations?.Select(a => new HitAnnotation(a.Id, a.Text, a.Author, a.CreatedAt.ToString("yyyy-MM-dd"))).ToList())).ToList());
     }
 }
 
@@ -77,4 +85,10 @@ public sealed record SearchDocsHit(
     string Path,
     string HeadingPath,
     string? SourceModifiedAt,
-    string Text);
+    string Text,
+    string Origin = "doc",
+    string? Author = null,
+    IReadOnlyList<HitAnnotation>? Annotations = null);
+
+/// <summary>An override note anchored to a hit's source document.</summary>
+public sealed record HitAnnotation(string Id, string Text, string Author, string CreatedAt);
