@@ -13,6 +13,9 @@ switch (args[0])
     case "convert":
         return ConvertCommand.Run(args[1..]);
 
+    case "chunk":
+        return ChunkCommand.Run(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -27,6 +30,7 @@ static int PrintUsage()
         Usage:
           rtfm ping             Check connectivity to OpenSearch
           rtfm convert <path>   Convert one document to markdown (stdout)
+          rtfm chunk <path>     Convert then show heading-aware chunks (stdout)
           rtfm --help           Show this help
 
         Environment:
