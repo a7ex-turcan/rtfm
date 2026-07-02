@@ -10,15 +10,18 @@ namespace Rtfm.Core.Search;
 /// hybrid search — a <c>hybrid</c> query pairing BM25 (<c>multi_match</c> over
 /// the analyzed fields) with kNN over <c>content_vector</c>, fused by the
 /// <c>rtfm-hybrid</c> normalization pipeline — so technical lookups keep their
-/// exact-token wins while conceptual questions match on meaning. Without an
-/// embedder (or if embedding fails, e.g. model not downloadable) it degrades to
-/// the Tier 1 BM25 query, loudly, rather than failing the search.
+/// exact-token wins while conceptual questions match on meaning. With an
+/// <see cref="IReranker"/> (Tier 3, Phase 11) it retrieves a generous
+/// candidate set and reorders it by cross-encoder relevance, returning
+/// sigmoid-squashed scores. Every tier degrades loudly rather than failing the
+/// search: no embedder → BM25; no reranker → the fused order stands.
 /// </summary>
-public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? embedder = null, Action<string>? log = null)
+public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? embedder = null, Action<string>? log = null, IReranker? reranker = null)
 {
     private readonly Action<string> _log = log ?? (_ => { });
     private bool _pipelineEnsured;
     private bool _embedderBroken;
+    private bool _rerankerBroken;
 
     /// <summary>
     /// Runs a search. When <paramref name="project"/> is null/empty the search
@@ -28,21 +31,119 @@ public sealed class DocumentSearch(OpenSearchGateway gateway, ITextEmbedder? emb
     {
         var vector = TryEmbedQuery(query);
 
+        // With a reranker, over-fetch so it has real candidates to reorder;
+        // without one, fetch exactly what the caller asked for. (Kept a bit
+        // tighter than the hybrid k because reranking cost is per *window*.)
+        var wantRerank = reranker is not null && !_rerankerBroken;
+        var fetch = wantRerank ? Math.Clamp(topK * 3, 12, 20) : topK;
+
         string body, json;
         if (vector is not null)
         {
             await EnsurePipelineAsync(cancellationToken).ConfigureAwait(false);
-            body = BuildHybridQuery(query, vector, topK, project);
+            body = BuildHybridQuery(query, vector, fetch, project);
             json = await gateway.SearchAsync(RtfmIndex.Name, body, RtfmIndex.HybridPipelineName, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            body = BuildQuery(query, topK, project);
+            body = BuildQuery(query, fetch, project);
             json = await gateway.SearchAsync(RtfmIndex.Name, body, searchPipeline: null, cancellationToken).ConfigureAwait(false);
         }
 
-        return ParseHits(json);
+        var hits = ParseHits(json);
+
+        if (wantRerank && hits.Count > 1)
+        {
+            try
+            {
+                // MS MARCO cross-encoders are trained on short passages; a full
+                // 1600-char chunk dilutes the signal until everything scores
+                // uniformly low (observed on the real corpus). Max-window
+                // scoring: split each candidate into overlapping windows (each
+                // re-carrying its breadcrumb), score all windows, and let a
+                // hit's best window speak for it.
+                var (windows, ownerHit) = BuildRerankWindows(hits);
+                var windowScores = reranker!.Score(query, windows);
+                var best = MaxPerHit(windowScores, ownerHit, hits.Count);
+                return Rerank(hits, best, topK);
+            }
+            catch (Exception ex)
+            {
+                _rerankerBroken = true; // don't retry per query — a broken model stays broken
+                _log($"rtfm: reranking unavailable, keeping fused order: {ex.Message}");
+            }
+        }
+
+        return hits.Count > topK ? hits.Take(topK).ToList() : hits;
     }
+
+    /// <summary>Window size in chars (≈250 wordpieces — near the passage length the reranker was trained on).</summary>
+    private const int RerankWindowChars = 1000;
+
+    private const int RerankWindowOverlap = 200;
+
+    /// <summary>
+    /// Flattens hits into scoring windows. Short chunks pass through whole;
+    /// long ones split with overlap, every window prefixed by the heading
+    /// breadcrumb so it stays self-describing. Internal for tests.
+    /// </summary>
+    internal static (IReadOnlyList<string> Windows, IReadOnlyList<int> OwnerHit) BuildRerankWindows(IReadOnlyList<SearchHit> hits)
+    {
+        var windows = new List<string>();
+        var owner = new List<int>();
+
+        for (var i = 0; i < hits.Count; i++)
+        {
+            var content = hits[i].Content;
+            if (content.Length <= RerankWindowChars)
+            {
+                windows.Add(content);
+                owner.Add(i);
+                continue;
+            }
+
+            var heading = hits[i].HeadingPath;
+            var body = content.StartsWith(heading + "\n\n", StringComparison.Ordinal)
+                ? content[(heading.Length + 2)..]
+                : content;
+
+            var stride = RerankWindowChars - RerankWindowOverlap;
+            for (var pos = 0; pos < body.Length; pos += stride)
+            {
+                var slice = body.Substring(pos, Math.Min(RerankWindowChars, body.Length - pos));
+                windows.Add($"{heading}\n\n{slice}");
+                owner.Add(i);
+
+                if (pos + RerankWindowChars >= body.Length)
+                {
+                    break;
+                }
+            }
+        }
+
+        return (windows, owner);
+    }
+
+    /// <summary>Best window score per hit. Internal for tests.</summary>
+    internal static float[] MaxPerHit(IReadOnlyList<float> windowScores, IReadOnlyList<int> ownerHit, int hitCount)
+    {
+        var best = Enumerable.Repeat(float.MinValue, hitCount).ToArray();
+        for (var w = 0; w < windowScores.Count; w++)
+        {
+            best[ownerHit[w]] = Math.Max(best[ownerHit[w]], windowScores[w]);
+        }
+
+        return best;
+    }
+
+    /// <summary>Reorders hits by cross-encoder score (sigmoid-squashed into [0,1] for display). Internal for tests.</summary>
+    internal static IReadOnlyList<SearchHit> Rerank(IReadOnlyList<SearchHit> hits, IReadOnlyList<float> scores, int topK)
+        => hits.Zip(scores, (hit, score) => hit with { Score = Math.Round(Sigmoid(score), 4) })
+            .OrderByDescending(h => h.Score)
+            .Take(topK)
+            .ToList();
+
+    internal static double Sigmoid(double logit) => 1.0 / (1.0 + Math.Exp(-logit));
 
     /// <summary>
     /// Embeds the query, or returns null when running lexical-only (no embedder,

@@ -26,4 +26,21 @@ internal static class EmbedderProvider
             return null;
         }
     }
+
+    /// <summary>Tier 3 reranker (Phase 11), same degradation rule: unavailable → search keeps the fused order.</summary>
+    public static async Task<CrossEncoder?> TryCreateRerankerAsync()
+    {
+        var reranker = new CrossEncoder(EmbeddingModelStore.ForReranker(log: Console.Error.WriteLine));
+        try
+        {
+            await reranker.EnsureReadyAsync().ConfigureAwait(false);
+            return reranker;
+        }
+        catch (Exception ex)
+        {
+            reranker.Dispose();
+            Console.Error.WriteLine($"WARNING: reranking disabled for this run: {ex.Message}");
+            return null;
+        }
+    }
 }

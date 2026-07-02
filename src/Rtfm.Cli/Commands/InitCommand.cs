@@ -72,14 +72,15 @@ internal static class InitCommand
             ? $"Created index [bold]{RtfmIndex.Name}[/] and search pipeline."
             : $"Index [bold]{RtfmIndex.Name}[/] and search pipeline already in place.");
 
-        // 6. Optional model warm-up.
+        // 6. Optional model warm-up (both tiers: embedder + reranker).
         var modelReady = false;
         if (withModel)
         {
-            modelReady = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false) is { } embedder;
+            modelReady = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false) is not null
+                && await EmbedderProvider.TryCreateRerankerAsync().ConfigureAwait(false) is not null;
             if (modelReady)
             {
-                Ui.Err.MarkupLine("Embedding model ready.");
+                Ui.Err.MarkupLine("Embedding + reranking models ready.");
             }
         }
 

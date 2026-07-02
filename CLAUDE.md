@@ -384,6 +384,7 @@ project" reuses delete-by-query (§2.9).
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
 | Embeddings (Tier 2) | `Microsoft.ML.OnnxRuntime` + `Microsoft.ML.Tokenizers`, all-MiniLM-L6-v2 (384-dim, auto-downloaded + cached) |
+| Reranker (Tier 3) | same runtime/tokenizer, ms-marco-MiniLM-L-6-v2 cross-encoder (max-window scoring) |
 | File watching | `System.IO.FileSystemWatcher` |
 | CLI presentation (`Rtfm.Cli` only — never `Rtfm.Mcp`) | `Spectre.Console` |
 
@@ -757,7 +758,7 @@ live run exposed 21 leaked watch manifests from unit tests and pre-`purge`
 smoke runs — `ManifestStoreTests` now uses unique `test-…` project names and
 purges in `finally`, and the litter was swept. 84/84 tests.
 
-### Phase 11 — Tier 3 retrieval: cross-encoder reranking
+### Phase 11 — Tier 3 retrieval: cross-encoder reranking ✅ **Done**
 The next precision lever after hybrid (§2.10): retrieve generously (the hybrid
 k is already 25+), then rerank the candidates with a small local cross-encoder
 (candidate: ms-marco-MiniLM family via ONNX — same runtime, tokenizer, and
@@ -766,6 +767,27 @@ no ingest or mapping changes; reuse `EmbeddingModelStore` for the second model.
 Same degradation rule as Tier 2: no model → skip reranking, loudly.
 **Done when:** a query set over the real corpus shows reranked top-3 ≥ hybrid
 top-3 (spot-check, not benchmark), with no query slower than ~1s end-to-end.
+
+*Delivered:* `CrossEncoder` (+ `IReranker`) in `Rtfm.Core/Embeddings` —
+**ms-marco-MiniLM-L-6-v2** via the same ONNX Runtime + `BertTokenizer` +
+model-store machinery as Tier 2 (`EmbeddingModelStore` generalized with a
+`ForReranker` factory; per-model cache subfolders; note the tokenizer property
+is `SeparatorTokenId`, not `SepTokenId`). Pair encoding is `[CLS] q [SEP] p
+[SEP]` with segment ids, built by concatenating two singly-encoded sequences
+and truncating the passage side. `DocumentSearch` over-fetches
+(clamp(3·topK, 12, 20)) when a reranker is present, reorders by cross-encoder
+score (sigmoid-squashed for display), and keeps the fused order — loudly — if
+the model is unavailable. **The engineering finding worth remembering:** naive
+full-chunk scoring *regressed* quality — MS MARCO cross-encoders are trained on
+~60-token passages, and 1600-char chunks diluted every score to logit −5..−11
+(the conceptual probe's right answer scored −1.3 as a snippet but −5.5 inside
+its chunk, and noise won). Fix: **max-window scoring** — each candidate splits
+into ~1000-char windows with 200 overlap, every window re-prefixed with its
+breadcrumb, and a hit's best window speaks for it. Validated on a five-query
+spot-check vs Tier 2: reranked top-3 ≥ hybrid on all five, strictly better on
+two (off-topic chunks evicted from top-3), with sharper confidence separation;
+steady-state MCP latency 150–677 ms/query. `rtfm init --with-model` now
+prefetches both models (~90 MB each). 93/93 tests.
 
 ### Phase 12 — Proactive contradiction detection (§2.13's Tier-2 add-on, now unblocked)
 The identity feature: docs rot and disagree, and nobody notices until it burns

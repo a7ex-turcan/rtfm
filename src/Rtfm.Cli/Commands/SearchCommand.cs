@@ -26,7 +26,8 @@ internal static class SearchCommand
         try
         {
             using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
-            var search = new DocumentSearch(new OpenSearchGateway(), embedder, Console.Error.WriteLine);
+            using var reranker = await EmbedderProvider.TryCreateRerankerAsync().ConfigureAwait(false);
+            var search = new DocumentSearch(new OpenSearchGateway(), embedder, Console.Error.WriteLine, reranker);
 
             var hits = await Ui.Err.Status()
                 .Spinner(Spinner.Known.Dots)

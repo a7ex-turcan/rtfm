@@ -40,7 +40,7 @@ library-local rules.
 | `Chunking` | `MarkdownChunker` — heading-aware, breadcrumbs, overlap, table-split-with-repeated-header |
 | `Indexing` | `RtfmIndex` (mapping + analyzer + pipeline JSON), `DocumentIndexer` (delete-by-query + bulk), `DocumentIngestor` (the one convert→chunk→embed→index path both executables share), `PathNormalizer` |
 | `Search` | `DocumentSearch` (hybrid with per-clause project filter; degrades to BM25 if embedding fails — never throw the search away), `DocumentCatalog` (list/get/similar reads for the Phase 8 MCP tools), `StatusService` (Phase 10 per-project rollups) |
-| `Embeddings` | `LocalEmbedder` (lazy ONNX MiniLM), `EmbeddingModelStore` (download/cache); `ITextEmbedder` keeps callers testable |
+| `Embeddings` | `LocalEmbedder` (lazy ONNX MiniLM) + `CrossEncoder` (Tier 3 reranker, max-window scoring — full chunks dilute MS MARCO scores), `EmbeddingModelStore` (per-model download/cache); `ITextEmbedder`/`IReranker` keep callers testable |
 | `Manifest` | Startup-reconcile state: normalized path → (mtime ticks, length), per-(folder, project) JSON |
 | `Watch` | `FolderWatcher` (debounce/lock-retry/rename/reconcile) + `WatchEvent` |
 

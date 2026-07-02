@@ -39,11 +39,12 @@ Three independent processes, each with its own lifecycle:
 
 The CLI converts each document to markdown, splits it into
 heading-aware chunks with breadcrumb context, and bulk-indexes them. Retrieval
-is **hybrid**: a tuned BM25 lexical search (excellent for technical lookups)
-fused with local in-process semantic embeddings (all-MiniLM-L6-v2 via ONNX
-Runtime — auto-downloaded once, ~90 MB, cached per user; without it search
-degrades gracefully to lexical-only). See [`CLAUDE.md`](./CLAUDE.md) for the
-full design and rationale.
+is **hybrid + reranked**: a tuned BM25 lexical search (excellent for technical
+lookups) fused with local in-process semantic embeddings, then the shortlist is
+reordered by a local cross-encoder for precision. Both models (all-MiniLM +
+ms-marco-MiniLM via ONNX Runtime, ~90 MB each) auto-download once and cache per
+user; without them search degrades gracefully tier by tier. See
+[`CLAUDE.md`](./CLAUDE.md) for the full design and rationale.
 
 ## Requirements
 
@@ -234,11 +235,12 @@ stderr — so piping or redirecting a command yields only the machine-usable
 part, plain and colorless. Exit codes: `0` success, `1` failure, `2` usage
 error.
 
-**Semantic tier.** The first `index`/`search`/`watch` run downloads the local
-embedding model (~90 MB, once per machine, cached under
-`LocalApplicationData/rtfm/models`). If the model can't be fetched (offline),
-commands warn and continue lexical-only — nothing breaks, conceptual queries
-just get weaker until the model is available.
+**Semantic tiers.** The first `index`/`search`/`watch` run downloads the local
+models (embedder + reranker, ~90 MB each, once per machine, cached under
+`LocalApplicationData/rtfm/models`; `rtfm init --with-model` prefetches both).
+If a model can't be fetched (offline), commands warn and degrade tier by tier —
+no reranker keeps the fused order, no embedder falls back to lexical-only;
+nothing breaks.
 
 | Environment variable | Meaning |
 |---|---|

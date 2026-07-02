@@ -21,10 +21,12 @@ builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogL
 // not yet cached), DocumentSearch degrades to Tier 1 BM25 and logs to stderr.
 builder.Services.AddSingleton(_ => new OpenSearchGateway());
 builder.Services.AddSingleton<ITextEmbedder>(_ => new LocalEmbedder(new EmbeddingModelStore(log: Console.Error.WriteLine)));
+builder.Services.AddSingleton<IReranker>(_ => new CrossEncoder(EmbeddingModelStore.ForReranker(log: Console.Error.WriteLine)));
 builder.Services.AddSingleton(sp => new DocumentSearch(
     sp.GetRequiredService<OpenSearchGateway>(),
     sp.GetRequiredService<ITextEmbedder>(),
-    Console.Error.WriteLine));
+    Console.Error.WriteLine,
+    sp.GetRequiredService<IReranker>()));
 builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
 
 builder.Services

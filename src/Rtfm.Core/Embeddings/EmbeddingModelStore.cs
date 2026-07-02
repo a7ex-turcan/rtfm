@@ -3,28 +3,43 @@ using Rtfm.Core.Configuration;
 namespace Rtfm.Core.Embeddings;
 
 /// <summary>
-/// Locates — and on first use downloads — the embedding model files (§2.10
-/// Tier 2). The model is all-MiniLM-L6-v2 exported to ONNX (384 dims, matching
-/// <see cref="Indexing.RtfmIndex.VectorDimension"/>): small, CPU-friendly, and
-/// needs no query/passage prefixes. Files are cached per-user under
-/// <see cref="RtfmEnvironment.ResolveModelDirectory"/> so the ~90 MB download
-/// happens once per machine, not per index run. Downloads are atomic
-/// (temp file + move) so a killed run can't leave a truncated model behind.
+/// Locates — and on first use downloads — one ONNX model's files (model.onnx +
+/// vocab.txt). Two models ride on this: the Tier 2 embedder (all-MiniLM-L6-v2,
+/// 384 dims matching <see cref="Indexing.RtfmIndex.VectorDimension"/>; no
+/// query/passage prefixes) and the Tier 3 reranker (ms-marco-MiniLM cross
+/// encoder, Phase 11) — same runtime, same cache layout. Files are cached
+/// per-user under <see cref="RtfmEnvironment.ResolveModelDirectory"/> in a
+/// per-model subfolder so each ~90 MB download happens once per machine, not
+/// per run. Downloads are atomic (temp file + move) so a killed run can't
+/// leave a truncated model behind.
 /// </summary>
 public sealed class EmbeddingModelStore
 {
-    public const string ModelName = "all-MiniLM-L6-v2";
+    public const string EmbedderModelName = "all-MiniLM-L6-v2";
+    public const string RerankerModelName = "ms-marco-MiniLM-L-6-v2";
 
-    private const string BaseUrl = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main";
-
+    private readonly string _modelName;
+    private readonly string _baseUrl;
     private readonly string _directory;
     private readonly Action<string> _log;
 
+    /// <summary>The Tier 2 embedding model (the historic default).</summary>
     public EmbeddingModelStore(string? directory = null, Action<string>? log = null)
+        : this(EmbedderModelName, "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main", directory, log)
     {
-        _directory = Path.Combine(directory ?? RtfmEnvironment.ResolveModelDirectory(), ModelName);
+    }
+
+    private EmbeddingModelStore(string modelName, string baseUrl, string? directory, Action<string>? log)
+    {
+        _modelName = modelName;
+        _baseUrl = baseUrl;
+        _directory = Path.Combine(directory ?? RtfmEnvironment.ResolveModelDirectory(), modelName);
         _log = log ?? (_ => { });
     }
+
+    /// <summary>The Tier 3 cross-encoder reranker (Phase 11).</summary>
+    public static EmbeddingModelStore ForReranker(string? directory = null, Action<string>? log = null)
+        => new(RerankerModelName, "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main", directory, log);
 
     public string ModelPath => Path.Combine(_directory, "model.onnx");
 
@@ -59,8 +74,8 @@ public sealed class EmbeddingModelStore
             return;
         }
 
-        var url = $"{BaseUrl}/{remoteFile}";
-        _log($"Downloading {ModelName}/{remoteFile} (one-time, cached in {_directory}) …");
+        var url = $"{_baseUrl}/{remoteFile}";
+        _log($"Downloading {_modelName}/{remoteFile} (one-time, cached in {_directory}) …");
 
         var temp = localPath + ".tmp";
         try
