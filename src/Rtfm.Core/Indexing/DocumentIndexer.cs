@@ -37,6 +37,14 @@ public sealed class DocumentIndexer(OpenSearchGateway gateway)
         return chunks.Count;
     }
 
+    /// <summary>
+    /// Removes every chunk for one document (§2.9). Used for deletes/renames in
+    /// watch mode. <paramref name="normalizedSourcePath"/> must already be run
+    /// through <see cref="PathNormalizer"/> — the same key used at index time.
+    /// </summary>
+    public Task RemoveDocumentAsync(string normalizedSourcePath, CancellationToken cancellationToken = default)
+        => gateway.DeleteByTermAsync(RtfmIndex.Name, "source_path", normalizedSourcePath, cancellationToken);
+
     /// <summary>Makes writes visible to search — call once after a batch.</summary>
     public Task RefreshAsync(CancellationToken cancellationToken = default)
         => gateway.RefreshAsync(RtfmIndex.Name, cancellationToken);

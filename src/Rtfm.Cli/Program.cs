@@ -22,6 +22,9 @@ switch (args[0])
     case "search":
         return await SearchCommand.RunAsync(args[1..]);
 
+    case "watch":
+        return await WatchCommand.RunAsync(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -38,6 +41,7 @@ static int PrintUsage()
           rtfm convert <path>   Convert one document to markdown (stdout)
           rtfm chunk <path>     Convert then show heading-aware chunks (stdout)
           rtfm index <folder> [--project <name>]   (Re)index a folder (default project "default")
+          rtfm watch <folder> [--project <name>]   Watch a folder and keep the index fresh (Ctrl+C to stop)
           rtfm search <query> [--project <name>]    Tier 1 search (omit --project to span all)
           rtfm --help           Show this help
 

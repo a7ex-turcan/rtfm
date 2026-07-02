@@ -505,12 +505,36 @@ advertises `search_docs`, `RTFM_PROJECT=pam` scopes results, each hit carries
 on stderr). Confirming *inside Claude Code* needs a restart to load `.mcp.json`
 (approval prompt expected; use `/mcp`) — an interactive step (§6).
 
-### Phase 5 — Watch mode
+### Phase 5 — Watch mode ✅ **Done**
 `rtfm watch ./docs` — FileSystemWatcher with debounce, lock retry, delete/rename
 handling, and startup reconcile against the manifest (§2.8).
 **Done when:** editing, adding, renaming, and deleting a doc are each reflected
 in search results within seconds, and a change made while the watcher was off is
 caught up on next start.
+
+*Delivered:* `FolderWatcher` in `Rtfm.Core/Watch` (per-path debounce over a
+~500ms quiet window via a `ConcurrentDictionary<key, Pending>` drained on a
+`PeriodicTimer`; `IOException` lock-retry with backoff; rename decomposed into
+delete-old + upsert-new; `Error`-event logging). Startup reconcile diffs the
+folder against a persisted **manifest** — `DocumentManifest` (normalized path →
+`{LastWriteUtcTicks, Length}`) + `ManifestStore` (per-`(folder, project)` JSON
+under `LocalApplicationData/rtfm/manifests`, atomic temp-file write) — re-indexing
+changed/new files, removing vanished ones, and skipping unchanged. The
+convert→chunk→index path was extracted into a shared `DocumentIngestor` (also
+owns `SupportedExtensions` + file enumeration) so `rtfm index` and `rtfm watch`
+agree; `DocumentIndexer` gained `RemoveDocumentAsync`; `rtfm index` now also
+writes the manifest so watch starts from a correct baseline. CLI: `rtfm watch
+<folder> [--project]` (Ctrl+C → clean shutdown + final flush; all output on
+stderr). Verified live against OpenSearch on a throwaway corpus: add / modify /
+rename / delete each reflected within seconds, and a stop → edit-while-off →
+restart run caught up correctly (re-indexed the changed doc, added the new one,
+removed the deleted one, manifest persisted across restarts). The key uses
+normalized (lower-cased) paths for coalescing + the index key, but the original
+path for file I/O (a lower-cased key won't open on a case-sensitive OS).
+**Known limitation:** deleting a whole subdirectory may not fire per-file
+`Deleted` events on every OS — the next startup reconcile catches it. `rtfm
+index` still does not prune docs deleted since the last run (unchanged from
+Phase 3); watch's reconcile is what prunes.
 
 ### Phase 6 — Semantic tier (deferred)
 Local in-process embeddings, backfill `knn_vector`, hybrid BM25 + kNN with RRF /
