@@ -261,11 +261,12 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-The tool surface is now four tools: `search_docs` plus the Phase 8 additions —
+The tool surface is now five tools: `search_docs`, the Phase 8 additions —
 `get_document(path, project?)` (full reassembled page), `list_sources(project?)`
 (corpus awareness), `find_similar(path, top_k?, project?)` (related docs via
-chunk-vector centroid). Still scheduled: `list_contradictions` (Phase 12),
-correction tools (Phase 13) — don't build ahead of their phase.
+chunk-vector centroid) — and `list_contradictions(project?, top_k?)` (Phase 12
+nominations). Still scheduled: correction tools (Phase 13) — don't build ahead
+of their phase.
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -789,7 +790,7 @@ two (off-topic chunks evicted from top-3), with sharper confidence separation;
 steady-state MCP latency 150–677 ms/query. `rtfm init --with-model` now
 prefetches both models (~90 MB each). 93/93 tests.
 
-### Phase 12 — Proactive contradiction detection (§2.13's Tier-2 add-on, now unblocked)
+### Phase 12 — Proactive contradiction detection (§2.13's Tier-2 add-on) ✅ **Done**
 The identity feature: docs rot and disagree, and nobody notices until it burns
 someone. At ingest, compare each new chunk's vector against *similar* chunks
 from **other documents in the same project** (cross-project differences are
@@ -806,6 +807,28 @@ side's doc is re-ingested and re-evaluate).
 **Done when:** planting a doc that contradicts an existing statement (the §2.13
 `admin` vs `super-admin` example) yields exactly that pair in
 `rtfm contradictions`, and the MCP tool returns it with both dates.
+
+*Delivered:* `Rtfm.Core/Contradictions` — `ContradictionIndex`
+(`rtfm-contradictions` side index: pair fields, unindexed excerpts),
+`ContradictionPair` (deterministic id = hash of the sorted chunk keys, so
+re-detection upserts; side A = newer doc), and `ContradictionDetector`. At
+ingest (`DocumentIngestor`, batch *and* watch): refresh main index → per-chunk
+kNN vs other docs in the same project (k=3, must_not self, score floor 0.75 ≈
+cosine 0.83) → the dumb §2.13 filter (different `source_modified_at`
+timestamps + texts differ after case/whitespace normalization — identical text
+is a copy, not a contradiction) → best candidate per chunk nominated. Pairs
+referencing a doc are dropped whenever it re-ingests or is removed, then
+re-evaluated — the side index survives §2.9's delete-and-reindex without going
+stale. Surfacing: `rtfm contradictions [--project]` (newest first, both sides
+with file/date/heading/excerpt) and the `list_contradictions` MCP tool, whose
+description carries the §2.13 B protocol (read both via `get_document`, prefer
+newer, surface the conflict — never silently choose). `rtfm purge` also drops
+the project's pairs. Verified live: the planted `admin` vs `super-admin` pair
+is the *only* nomination (sim 0.83, both dates correct in CLI and MCP);
+re-index leaves exactly 1 pair (idempotent). Real-corpus noise gauge: 2
+nominations across pam's 111 chunks, both Confluence *template boilerplate*
+(shared "Document Owners"/"PRD Approval" tables) — the anticipated noise mode,
+absorbed by LLM-judges-at-read-time. 102/102 tests.
 
 ### Phase 13 — Corrections that survive re-index (§2.13 C, decision + build)
 When an agent + user confirm "the docs are wrong / outdated here", persist that

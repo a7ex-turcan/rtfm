@@ -1,4 +1,5 @@
 using Rtfm.Core.Chunking;
+using Rtfm.Core.Contradictions;
 using Rtfm.Core.Conversion;
 using Rtfm.Core.Embeddings;
 
@@ -23,11 +24,18 @@ public sealed class DocumentIngestor
     private readonly MarkdownChunker _chunker;
     private readonly DocumentIndexer _indexer;
     private readonly ITextEmbedder? _embedder;
+    private readonly ContradictionDetector? _detector;
 
-    public DocumentIngestor(DocumentIndexer indexer, ITextEmbedder? embedder = null, DocumentConverter? converter = null, MarkdownChunker? chunker = null)
+    public DocumentIngestor(
+        DocumentIndexer indexer,
+        ITextEmbedder? embedder = null,
+        ContradictionDetector? detector = null,
+        DocumentConverter? converter = null,
+        MarkdownChunker? chunker = null)
     {
         _indexer = indexer;
         _embedder = embedder;
+        _detector = detector;
         _converter = converter ?? new DocumentConverter();
         _chunker = chunker ?? new MarkdownChunker();
     }
@@ -40,8 +48,16 @@ public sealed class DocumentIngestor
             .Where(IsSupported)
             .OrderBy(f => f, StringComparer.Ordinal);
 
-    public Task<bool> EnsureIndexAsync(CancellationToken cancellationToken = default)
-        => _indexer.EnsureIndexAsync(cancellationToken);
+    public async Task<bool> EnsureIndexAsync(CancellationToken cancellationToken = default)
+    {
+        var created = await _indexer.EnsureIndexAsync(cancellationToken).ConfigureAwait(false);
+        if (_detector is not null)
+        {
+            await _detector.EnsureIndexAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return created;
+    }
 
     public Task RefreshAsync(CancellationToken cancellationToken = default)
         => _indexer.RefreshAsync(cancellationToken);
@@ -64,6 +80,7 @@ public sealed class DocumentIngestor
         if (chunks.Count == 0)
         {
             await _indexer.RemoveDocumentAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+            await RemovePairsAsync(sourcePath, cancellationToken).ConfigureAwait(false);
             return 0;
         }
 
@@ -73,10 +90,27 @@ public sealed class DocumentIngestor
             ? null
             : chunks.Select(c => _embedder.Embed(c.ContentWithBreadcrumb)).ToList();
 
-        return await _indexer.IndexDocumentAsync(chunks, indexedAt, vectors, cancellationToken).ConfigureAwait(false);
+        var count = await _indexer.IndexDocumentAsync(chunks, indexedAt, vectors, cancellationToken).ConfigureAwait(false);
+
+        // Contradiction pass (§2.13, Phase 12): drop pairs referencing the old
+        // version of this doc, then re-evaluate from the fresh chunks.
+        if (_detector is not null)
+        {
+            await _detector.RemoveForPathAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+            await _detector.DetectForDocumentAsync(chunks, vectors, indexedAt, cancellationToken).ConfigureAwait(false);
+        }
+
+        return count;
     }
 
-    /// <summary>Removes every chunk for the document at <paramref name="path"/> (delete/rename handling).</summary>
-    public Task RemoveFileAsync(string path, CancellationToken cancellationToken = default)
-        => _indexer.RemoveDocumentAsync(PathNormalizer.Normalize(path), cancellationToken);
+    /// <summary>Removes every chunk for the document at <paramref name="path"/> (delete/rename handling), plus its contradiction pairs.</summary>
+    public async Task RemoveFileAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var normalized = PathNormalizer.Normalize(path);
+        await _indexer.RemoveDocumentAsync(normalized, cancellationToken).ConfigureAwait(false);
+        await RemovePairsAsync(normalized, cancellationToken).ConfigureAwait(false);
+    }
+
+    private Task RemovePairsAsync(string normalizedPath, CancellationToken cancellationToken)
+        => _detector?.RemoveForPathAsync(normalizedPath, cancellationToken) ?? Task.CompletedTask;
 }

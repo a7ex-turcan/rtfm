@@ -32,8 +32,9 @@ internal static class WatchCommand
         }
 
         using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
-        var indexer = new DocumentIndexer(new OpenSearchGateway());
-        var ingestor = new DocumentIngestor(indexer, embedder);
+        var gateway = new OpenSearchGateway();
+        var indexer = new DocumentIndexer(gateway);
+        var ingestor = new DocumentIngestor(indexer, embedder, new Rtfm.Core.Contradictions.ContradictionDetector(gateway));
         var manifestStore = ManifestStore.For(folder, project);
 
         using var cts = new CancellationTokenSource();

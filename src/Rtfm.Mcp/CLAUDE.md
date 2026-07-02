@@ -40,6 +40,10 @@ framing and the server silently fails to connect.
   `find_similar(path, top_k, project?)` (`CatalogTools`, Phase 8) — all backed
   by `DocumentCatalog` in Core; path arguments accept full paths or bare
   filenames (exact-then-wildcard resolution).
+- `list_contradictions(project?, top_k)` (`ContradictionTools`, Phase 12) —
+  nominated doc-vs-doc disagreements from `ContradictionDetector`; the
+  description carries the read-both / prefer-newer / surface-the-conflict
+  protocol (§2.13 B).
 - Scope for every tool resolves through
   `RtfmEnvironment.ResolveProjectScope` (`RTFM_PROJECT` default, per-call
   override, `*`/`all` sentinel).

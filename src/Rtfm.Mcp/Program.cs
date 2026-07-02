@@ -28,6 +28,7 @@ builder.Services.AddSingleton(sp => new DocumentSearch(
     Console.Error.WriteLine,
     sp.GetRequiredService<IReranker>()));
 builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
+builder.Services.AddSingleton(sp => new Rtfm.Core.Contradictions.ContradictionDetector(sp.GetRequiredService<OpenSearchGateway>()));
 
 builder.Services
     .AddMcpServer()

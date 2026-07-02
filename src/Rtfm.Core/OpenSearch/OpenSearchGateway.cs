@@ -89,15 +89,20 @@ public sealed class OpenSearchGateway
     /// Deletes all documents whose exact <paramref name="field"/> equals
     /// <paramref name="value"/> (§2.9). Returns the number of documents deleted.
     /// </summary>
-    public async Task<long> DeleteByTermAsync(string index, string field, string value, CancellationToken cancellationToken = default)
+    public Task<long> DeleteByTermAsync(string index, string field, string value, CancellationToken cancellationToken = default)
     {
         var query = new { query = new { term = new Dictionary<string, string> { [field] = value } } };
-        var body = JsonSerializer.Serialize(query);
+        return DeleteByQueryAsync(index, JsonSerializer.Serialize(query), cancellationToken);
+    }
+
+    /// <summary>Runs an arbitrary delete-by-query body. Returns the number of documents deleted.</summary>
+    public async Task<long> DeleteByQueryAsync(string index, string queryJson, CancellationToken cancellationToken = default)
+    {
         var response = await _client
-            .DeleteByQueryAsync<StringResponse>(index, PostData.String(body), ctx: cancellationToken)
+            .DeleteByQueryAsync<StringResponse>(index, PostData.String(queryJson), ctx: cancellationToken)
             .ConfigureAwait(false);
 
-        EnsureSuccess(response, $"delete_by_query on {index}.{field}");
+        EnsureSuccess(response, $"delete_by_query on {index}");
 
         using var doc = JsonDocument.Parse(response.Body);
         return doc.RootElement.TryGetProperty("deleted", out var deleted) && deleted.ValueKind == JsonValueKind.Number

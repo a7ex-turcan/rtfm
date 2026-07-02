@@ -43,8 +43,9 @@ internal static class IndexCommand
         // Before the progress display starts: the embedder may log a one-time
         // model download, which must not interleave with a live render.
         using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
-        var indexer = new DocumentIndexer(new OpenSearchGateway());
-        var ingestor = new DocumentIngestor(indexer, embedder);
+        var gateway = new OpenSearchGateway();
+        var indexer = new DocumentIndexer(gateway);
+        var ingestor = new DocumentIngestor(indexer, embedder, new Rtfm.Core.Contradictions.ContradictionDetector(gateway));
 
         var created = await ingestor.EnsureIndexAsync().ConfigureAwait(false);
         Ui.Err.MarkupLine(created
