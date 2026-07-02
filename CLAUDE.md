@@ -505,6 +505,16 @@ Notes on this:
   and keep all diagnostics on stderr.
 - Conversion and chunking are the quality-critical paths; **back them with
   fixture tests using real (sanitized) Confluence exports**, not synthetic docs.
+- **Build gotcha — refresh the CLI before running it by hand.** `dotnet test`
+  (and `dotnet build` of just `Rtfm.Core`) rebuilds Core but **not** the
+  `Rtfm.Cli` / `Rtfm.Mcp` executables — they aren't in the test build's graph.
+  Their `bin/` keeps the *previously copied* `Rtfm.Core.dll`, so invoking the
+  built DLL directly (`dotnet src/Rtfm.Cli/bin/.../rtfm.dll …`) silently runs
+  **stale** Core code after a Core-only change. Fix: build the whole solution
+  (`dotnet build Rtfm.slnx -c Release`) before invoking a built DLL, or just use
+  `dotnet run --project src/Rtfm.Cli -- …`, which rebuilds the exe and its
+  references first. Same trap applies to the MCP server: rebuild before you
+  reconnect (§2.2, §6).
 - Don't build Tier 2 (embeddings/hybrid) or the Open XML table fallback until
   their triggering conditions are actually hit. Resist scope creep — the joke is
   that the answer was in the docs all along, not that we boiled the ocean.
