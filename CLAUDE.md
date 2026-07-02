@@ -384,6 +384,7 @@ project" reuses delete-by-query (§2.9).
 | xlsx → markdown (Phase 9) | `ClosedXML` (sheet sections + pipe tables) |
 | CSV → markdown (Phase 9) | none — small built-in RFC 4180-ish parser |
 | draw.io → markdown (Phase 15) | none — XLinq + DeflateStream (+ AngleSharp for labels) |
+| OCR for PDF-embedded images (Phase 16) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -402,8 +403,10 @@ project" reuses delete-by-query (§2.9).
 > **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +
 > `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). `Spectre.Console` **0.57.1**
 > (Phase 7). `PdfPig` **0.1.15** (NuGet ID `PdfPig`, *not* the stale
-> `UglyToad.PdfPig`) + `ClosedXML` **0.105.0** (Phase 9). Bump deliberately,
-> not automatically.
+> `UglyToad.PdfPig`) + `ClosedXML` **0.105.0** (Phase 9). `RapidOcrNet`
+> **2.0.0** (Phase 16 — the model-copy `None` items in Rtfm.Core.csproj are
+> version-locked to this pin; bump both together). Bump deliberately, not
+> automatically.
 
 ---
 
@@ -918,6 +921,34 @@ the diagram at #1. Known limit: an entity buried in a large all-entities
 Shapes chunk can lose to prose docs on vague queries (the symbol-density
 caveat in practice) — revisit per-entity chunk granularity if it bites.
 118/118 tests.
+
+### Phase 16 — OCR for images embedded in PDFs ✅ **Done**
+Diagrams saved as *pictures* inside PDFs carry knowledge no text extractor can
+reach. Two cases: vector-text diagrams (PdfPig already extracts those words —
+solved since Phase 9) and raster images, which need OCR.
+**Done when:** a PDF whose knowledge exists only inside an embedded raster
+image indexes and answers a question about that content.
+
+*Delivered:* **RapidOcrNet 2.0.0** (Apache-2.0, by a PdfPig maintainer) —
+PaddleOCR PP-OCRv5 models via the same `Microsoft.ML.OnnxRuntime` we already
+ship; the models (~13 MB det/cls/rec + dict) live *inside* the NuGet package,
+so there is no download and no offline degradation path. `PdfConverter` now
+extracts each page's embedded images (PdfPig `GetImages()`; PNG re-encode with
+raw-bytes/JPEG fallback via SkiaSharp), skips icons (shorter side < 80 px),
+caps at 8 images/page, OCRs the rest, and appends each result as an
+`[Image text] …` paragraph at that page's end. One shared lazy engine per
+process, initialized with **explicit absolute model paths** — the package
+default resolves against the CWD, which for a CLI is wherever the user stands.
+**Packaging gotcha:** RapidOcrNet's `.targets` copies models only for *direct*
+references (`build/`, no `buildTransitive/`) — Core carries explicit
+`None`+`CopyToOutputDirectory` items so `models\v5\` flows to the Cli/Mcp/test
+outputs (version-locked to the pin; bump together). Any OCR failure skips the
+image, never the document. Verified: unit fixtures (SkiaSharp-drawn diagram
+JPEG embedded via PdfPig's writer → labels extracted; tiny icon skipped) and
+live end-to-end — a PDF whose retention policy existed only as pixels answers
+"how are alerts escalated and what is the retention" at **#1 (1.00)**.
+Notably, OCR'd prose scores *well* on the cross-encoder (unlike drawio symbol
+notation). 120/120 tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

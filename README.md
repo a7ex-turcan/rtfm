@@ -225,7 +225,9 @@ that repo's `.mcp.json` instead of relying on either variable.
 **Supported document formats** (detected by content, not extension): Confluence
 "Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`,
 Markdown (`.md`/`.markdown`), PDF (headings inferred from font sizes — expect
-flatter structure than Word exports), Excel `.xlsx` (each sheet becomes a
+flatter structure than Word exports; **embedded raster images are OCR'd**, so
+diagrams saved as pictures still contribute their labels — fully local, models
+ship with the tool), Excel `.xlsx` (each sheet becomes a
 section with its data as a table), CSV (one table, header row preserved
 across chunk splits), and draw.io `.drawio` diagrams (each page becomes a
 section listing its shapes — ER tables with their columns — and its

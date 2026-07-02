@@ -1,5 +1,8 @@
 using System.Globalization;
 using System.Text;
+using Microsoft.ML.OnnxRuntime;
+using RapidOcrNet;
+using SkiaSharp;
 using UglyToad.PdfPig;
 using UglyToad.PdfPig.Content;
 
@@ -26,13 +29,15 @@ public sealed class PdfConverter
     {
         using var document = PdfDocument.Open(ReadAll(input));
 
-        var pages = document.GetPages().Select(BuildLines).ToList();
-        var bodySize = MedianLetterSize(pages.SelectMany(p => p));
-        var headingLevels = AssignHeadingLevels(pages.SelectMany(p => p), bodySize);
+        var pages = document.GetPages()
+            .Select(p => (Lines: BuildLines(p), ImageTexts: ExtractImageTexts(p)))
+            .ToList();
+        var bodySize = MedianLetterSize(pages.SelectMany(p => p.Lines));
+        var headingLevels = AssignHeadingLevels(pages.SelectMany(p => p.Lines), bodySize);
 
         var markdown = RenderMarkdown(pages, bodySize, headingLevels);
         var title = FirstNonEmpty(document.Information?.Title)
-            ?? FirstTopHeading(pages.SelectMany(p => p), headingLevels, bodySize);
+            ?? FirstTopHeading(pages.SelectMany(p => p.Lines), headingLevels, bodySize);
 
         return new ConversionResult(
             SourcePath: sourcePath,
@@ -102,7 +107,9 @@ public sealed class PdfConverter
     }
 
     private static string RenderMarkdown(
-        IReadOnlyList<IReadOnlyList<PdfLine>> pages, double bodySize, Dictionary<double, int> headingLevels)
+        IReadOnlyList<(IReadOnlyList<PdfLine> Lines, IReadOnlyList<string> ImageTexts)> pages,
+        double bodySize,
+        Dictionary<double, int> headingLevels)
     {
         var sb = new StringBuilder();
         var paragraph = new List<string>();
@@ -116,7 +123,7 @@ public sealed class PdfConverter
             }
         }
 
-        foreach (var page in pages)
+        foreach (var (page, imageTexts) in pages)
         {
             var gaps = page.Zip(page.Skip(1), (a, b) => a.Baseline - b.Baseline).Where(g => g > 0).OrderBy(g => g).ToList();
             var typicalGap = gaps.Count == 0 ? 0 : gaps[gaps.Count / 2];
@@ -147,9 +154,112 @@ public sealed class PdfConverter
             }
 
             FlushParagraph(); // page boundary always ends the paragraph
+
+            // OCR'd text from the page's embedded images (Phase 16) — one
+            // paragraph per image so a diagram's labels stay together.
+            foreach (var text in imageTexts)
+            {
+                sb.Append("[Image text] ").Append(text.ReplaceLineEndings("\n").Trim()).Append("\n\n");
+            }
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    // ---- Phase 16: OCR for embedded images (diagrams saved as pictures) ----
+
+    /// <summary>Ignore icons/logos: the shorter side must reach this many pixels.</summary>
+    private const int MinImageDimension = 80;
+
+    private const int MaxImagesPerPage = 8;
+
+    /// <summary>
+    /// One shared OCR engine per process (models load once, ~15 MB). Ships
+    /// inside the RapidOcrNet package — no download, no network. Null when the
+    /// model files aren't next to the binary (never expected; OCR is then
+    /// skipped rather than failing conversion).
+    /// </summary>
+    private static readonly Lazy<RapidOcr?> OcrEngine = new(CreateOcrEngine, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static RapidOcr? CreateOcrEngine()
+    {
+        try
+        {
+            // Explicit absolute paths: the package's own default resolves
+            // relative to the *working directory*, which for rtfm is wherever
+            // the user happens to stand.
+            var dir = Path.Combine(AppContext.BaseDirectory, "models", "v5");
+            var ocr = new RapidOcr();
+            ocr.InitModels(
+                Path.Combine(dir, "ch_PP-OCRv5_mobile_det.onnx"),
+                Path.Combine(dir, "ch_ppocr_mobile_v2.0_cls_infer.onnx"),
+                Path.Combine(dir, "latin_PP-OCRv5_rec_mobile_infer.onnx"),
+                Path.Combine(dir, "ppocrv5_latin_dict.txt"),
+                new SessionOptions());
+            return ocr;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractImageTexts(Page page)
+    {
+        var texts = new List<string>();
+        var ocr = OcrEngine.Value;
+        if (ocr is null)
+        {
+            return texts;
+        }
+
+        var used = 0;
+        foreach (var image in page.GetImages())
+        {
+            if (used >= MaxImagesPerPage)
+            {
+                break;
+            }
+
+            if (Math.Min(image.WidthInSamples, image.HeightInSamples) < MinImageDimension)
+            {
+                continue;
+            }
+
+            try
+            {
+                using var bitmap = DecodeImage(image);
+                if (bitmap is null)
+                {
+                    continue;
+                }
+
+                used++;
+                var result = ocr.Detect(bitmap, RapidOcrOptions.Default);
+                var text = result.StrRes?.Trim();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    texts.Add(text);
+                }
+            }
+            catch
+            {
+                // One unreadable image never sinks the document.
+            }
+        }
+
+        return texts;
+    }
+
+    /// <summary>PNG re-encode covers most PDF filters; raw bytes cover DCT (JPEG), which SkiaSharp decodes directly.</summary>
+    private static SKBitmap? DecodeImage(IPdfImage image)
+    {
+        if (image.TryGetPng(out var png))
+        {
+            return SKBitmap.Decode(png);
+        }
+
+        return SKBitmap.Decode(image.RawBytes.ToArray());
     }
 
     private static string? FirstTopHeading(IEnumerable<PdfLine> lines, Dictionary<double, int> levels, double bodySize)

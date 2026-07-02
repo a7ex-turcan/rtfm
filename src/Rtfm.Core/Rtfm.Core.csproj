@@ -11,6 +11,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- RapidOcrNet's own .targets copies its OCR models only for the project
+         that references it DIRECTLY (build/, no buildTransitive/). These None
+         items flow across ProjectReferences, so Rtfm.Cli / Rtfm.Mcp / tests
+         get models\v5\ in their output too. Version-locked to the pin above —
+         bump both together. -->
+    <None Include="$(NuGetPackageRoot)rapidocrnet\2.0.0\models\v5\*"
+          Link="models\v5\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.5.1" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Mammoth" Version="1.11.0" />
@@ -19,6 +31,7 @@
     <PackageReference Include="MimeKit" Version="4.17.0" />
     <PackageReference Include="OpenSearch.Net" Version="1.8.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
+    <PackageReference Include="RapidOcrNet" Version="2.0.0" />
     <PackageReference Include="ReverseMarkdown" Version="5.4.0" />
   </ItemGroup>
 
