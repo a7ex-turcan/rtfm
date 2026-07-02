@@ -56,6 +56,11 @@ Runs on Windows, macOS, and Linux.
 
 ## Getting started
 
+The 60-second tour below works from the repo root on any OS. For a full
+per-machine setup — commands on PATH, persistent env vars, Claude Code wiring —
+follow [Windows local setup](#windows-local-setup) or
+[macOS local setup](#macos-local-setup).
+
 ```bash
 # 1. Start the local search store
 docker compose up -d
@@ -75,6 +80,127 @@ dotnet run --project src/Rtfm.Cli -- search "how are roles mapped to functions"
 # 6. (optional) Keep the index fresh as docs change
 dotnet run --project src/Rtfm.Cli -- watch ./docs
 ```
+
+## Windows local setup
+
+Step-by-step for a fresh machine, until RTFM ships as an installable package
+(Phase 14). Everything below is PowerShell.
+
+**1. Install prerequisites** (skip what you have):
+
+```powershell
+winget install Microsoft.DotNet.SDK.10
+winget install Docker.DockerDesktop     # start it once so the engine is running
+winget install Git.Git
+```
+
+**2. Clone and build** (Release — the MCP config points at the Release output):
+
+```powershell
+git clone <repo-url> D:\Projects\rtfm    # any path works; used as RTFM_HOME below
+cd D:\Projects\rtfm
+dotnet build Rtfm.slnx -c Release
+```
+
+**3. Start OpenSearch** (one container + a persistent volume; survives reboots
+with Docker Desktop's autostart):
+
+```powershell
+docker compose up -d
+```
+
+**4. Put `rtfm` and `rtfm-mcp` on your PATH and set `RTFM_HOME`** (persistent,
+user-scoped — new terminals only; already-open ones won't see it):
+
+```powershell
+$rtfmHome = 'D:\Projects\rtfm'           # wherever you cloned
+[Environment]::SetEnvironmentVariable('RTFM_HOME', $rtfmHome, 'User')
+$bins = ";$rtfmHome\src\Rtfm.Cli\bin\Release\net10.0;$rtfmHome\src\Rtfm.Mcp\bin\Release\net10.0"
+[Environment]::SetEnvironmentVariable('Path', ([Environment]::GetEnvironmentVariable('Path','User').TrimEnd(';') + $bins), 'User')
+```
+
+**5. Verify and index** (open a new terminal first; the first index downloads
+the embedding model, ~90 MB, once per machine):
+
+```powershell
+rtfm ping
+rtfm index C:\path\to\your\docs --project myproject
+rtfm status
+rtfm search "something you know is in the docs" --project myproject
+```
+
+**6. Wire your LLM client** — see
+[Wiring into Claude Code](#wiring-into-claude-code) and
+[Using RTFM from your other repos](#using-rtfm-from-your-other-repos). With
+step 4 done, other repos can use the short form:
+`{ "command": "rtfm-mcp", "env": { "RTFM_PROJECT": "myproject" } }`.
+
+> **Rebuild gotcha:** any running MCP server (i.e. an open Claude Code session
+> using rtfm) holds a file lock on the built DLLs — disconnect via `/mcp` or
+> close the session before `dotnet build`, then reconnect.
+
+## macOS local setup
+
+Same shape as Windows; the differences are the package manager and how env vars
+persist (shell profile instead of the registry). Commands assume zsh (the
+default) and Apple Silicon or Intel — both work; the OpenSearch image and ONNX
+runtime are multi-arch.
+
+**1. Install prerequisites** (skip what you have):
+
+```bash
+brew install --cask dotnet-sdk          # .NET 10 SDK
+brew install --cask docker              # Docker Desktop; launch it once
+brew install git
+```
+
+**2. Clone and build:**
+
+```bash
+git clone <repo-url> ~/src/rtfm         # any path works; used as RTFM_HOME below
+cd ~/src/rtfm
+dotnet build Rtfm.slnx -c Release
+```
+
+**3. Start OpenSearch** (Docker Desktop's VM already sets `vm.max_map_count`;
+only *native Linux* hosts need to do that by hand):
+
+```bash
+docker compose up -d
+```
+
+**4. Put `rtfm` and `rtfm-mcp` on your PATH and set `RTFM_HOME`** — append to
+your shell profile (the built executables are named plain `rtfm` and
+`rtfm-mcp`, no extension):
+
+```bash
+cat >> ~/.zshrc <<'EOF'
+export RTFM_HOME="$HOME/src/rtfm"
+export PATH="$PATH:$RTFM_HOME/src/Rtfm.Cli/bin/Release/net10.0:$RTFM_HOME/src/Rtfm.Mcp/bin/Release/net10.0"
+EOF
+source ~/.zshrc
+```
+
+**5. Verify and index** (first index downloads the embedding model, ~90 MB,
+once per machine):
+
+```bash
+rtfm ping
+rtfm index ~/docs/myproject --project myproject
+rtfm status
+rtfm search "something you know is in the docs" --project myproject
+```
+
+**6. Wire your LLM client** — see
+[Wiring into Claude Code](#wiring-into-claude-code) and
+[Using RTFM from your other repos](#using-rtfm-from-your-other-repos).
+macOS caveat: GUI-launched apps don't read `~/.zshrc`, so a Dock-launched
+Claude Code sees neither your PATH additions nor `RTFM_HOME`. Launch Claude
+Code from a terminal (it inherits your shell env), or put an absolute path in
+that repo's `.mcp.json` instead of relying on either variable.
+
+> **Rebuild gotcha:** same as Windows — a running MCP server locks the built
+> DLLs; disconnect sessions before rebuilding.
 
 ## CLI reference
 
