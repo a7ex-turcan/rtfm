@@ -128,10 +128,18 @@ docker compose --profile debug up -d      # → http://localhost:5601
 
 The MCP server is registered as a project-scoped server via the committed
 [`.mcp.json`](./.mcp.json) at the repo root, so every developer gets it on clone.
-It exposes one tool, `search_docs(query, top_k, project?)`, returning ranked
-passages with their project, source, heading breadcrumb, last-modified date, and
-text. Scope is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or pass
-`project="*"` to search across all projects).
+It exposes four tools:
+
+| Tool | Purpose |
+|---|---|
+| `search_docs(query, top_k, project?)` | Ranked passages (hybrid lexical + semantic) with project, source, path, breadcrumb, last-modified date, text |
+| `get_document(path, project?)` | One full document as markdown, reassembled from its chunks — for answers that sprawl past a single passage |
+| `list_sources(project?)` | Every indexed doc with title, project, date, chunk count — corpus awareness ("do the docs even cover this?") |
+| `find_similar(path, top_k, project?)` | Semantically related documents, with the best-matching section as the "why" |
+
+Scope for all tools is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or
+pass `project="*"` to search across all projects). Path arguments accept the
+full `path` from other tools' results or a bare filename.
 
 Build in Release first (the config points at the built DLL, not `dotnet run`),
 then use `/mcp` in Claude Code to confirm `rtfm` connected and see its tools.

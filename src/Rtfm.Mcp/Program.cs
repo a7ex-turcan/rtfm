@@ -25,6 +25,7 @@ builder.Services.AddSingleton(sp => new DocumentSearch(
     sp.GetRequiredService<OpenSearchGateway>(),
     sp.GetRequiredService<ITextEmbedder>(),
     Console.Error.WriteLine));
+builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
 
 builder.Services
     .AddMcpServer()

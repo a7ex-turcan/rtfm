@@ -31,6 +31,10 @@ public static class SearchDocsTool
           and surface the disagreement to the user rather than silently choosing.
         - Across projects, differences are expected context — attribute each to its project; do NOT
           report them as contradictions.
+
+        Follow-ups: each hit carries its `path` — pass it to get_document for the full page when the
+        answer sprawls past the chunk, or to find_similar for related documents. list_sources shows
+        what's indexed at all.
         """)]
     public static async Task<SearchDocsResult> SearchDocs(
         DocumentSearch search,
@@ -50,6 +54,7 @@ public static class SearchDocsTool
                 Score: Math.Round(h.Score, 2),
                 Project: h.Project,
                 Source: Path.GetFileName(h.SourcePath),
+                Path: h.SourcePath,
                 HeadingPath: h.HeadingPath,
                 SourceModifiedAt: h.SourceModifiedAt?.ToString("yyyy-MM-dd"),
                 Text: h.Content)).ToList());
@@ -67,6 +72,7 @@ public sealed record SearchDocsHit(
     double Score,
     string Project,
     string Source,
+    string Path,
     string HeadingPath,
     string? SourceModifiedAt,
     string Text);

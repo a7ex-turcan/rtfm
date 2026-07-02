@@ -253,10 +253,11 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-Later additions are now scheduled rather than hypothetical: `get_document` /
-`list_sources` / `find_similar` are **Phase 8**; `list_contradictions` is
-Phase 12; correction tools are Phase 13. Don't build any of them ahead of their
-phase.
+The tool surface is now four tools: `search_docs` plus the Phase 8 additions —
+`get_document(path, project?)` (full reassembled page), `list_sources(project?)`
+(corpus awareness), `find_similar(path, top_k?, project?)` (related docs via
+chunk-vector centroid). Still scheduled: `list_contradictions` (Phase 12),
+correction tools (Phase 13) — don't build ahead of their phase.
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -629,7 +630,7 @@ contract, so the redirected fallback (and the smoke scripts parsing it) is
 unchanged. Verified: 51/51 tests, watch smoke script green unmodified, MCP raw
 stdio still pure JSON-RPC, index/search/ping exercised against the live stack.
 
-### Phase 8 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar`
+### Phase 8 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar` ✅ **Done**
 The §2.11 "possible later additions", promoted: using the tool in anger shows
 the agent often needs more than a 1600-char chunk.
 - `get_document(path, project?)` — the full converted markdown of one document,
@@ -648,6 +649,26 @@ ingest changes.
 **Done when:** from Claude Code, an answer that spans chunk boundaries can be
 completed via `get_document`; `list_sources` returns the full corpus with
 correct metadata; `find_similar` on the RBAC doc surfaces the ABAC doc.
+
+*Delivered:* `DocumentCatalog` in Core (`CatalogModels` records) +
+`CatalogTools` in Mcp; `DocumentCatalog` registered in DI. `list_sources` =
+`terms` agg on `source_path` (+ `top_hits` for title/project/date, `doc_count`
+as chunk count). `get_document` = chunks fetched ordinal-sorted and reassembled
+(title once, each breadcrumb once — skipped when it repeats the title —
+`ContentWithBreadcrumb` prefix stripped); reassembly from *chunks*, not
+re-reading the file, because the stored path key is lower-cased and won't open
+on case-sensitive filesystems (§2.12); overlap seams may repeat a few lines —
+documented in the tool description. `find_similar` = mean of the doc's chunk
+vectors, L2-normalized, kNN with `must_not` self + project filter, best chunk
+per candidate doc wins; explicit `vectorsAvailable=false` note when the doc was
+indexed lexical-only. Path arguments resolve exact-first then `*/filename`
+wildcard, so the short `source` names from `search_docs` work; `search_docs`
+hits now also carry the full `path` for chaining (its description points at the
+new tools). Verified over raw stdio: four tools advertised; `list_sources`
+returns the 5-doc corpus with correct counts; `get_document` by bare filename
+reassembles 25 chunks (~22 K chars, title first); **`find_similar` on the RBAC
+doc ranks the ABAC doc #1 (0.60)** — the acceptance criterion. 59/59 tests.
+In-Claude-Code confirmation needs the usual restart to reload the server.
 
 ### Phase 9 — Format expansion: PDF, Excel, CSV
 Widen §2.5's converter fan-in; the shared tail (strip → markdown → chunk) stays

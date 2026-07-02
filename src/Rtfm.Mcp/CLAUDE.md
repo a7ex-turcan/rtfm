@@ -34,14 +34,21 @@ framing and the server silently fails to connect.
 
 ## Tool surface
 
-- `search_docs(query, top_k, project?)` — scope resolved by
+- `search_docs(query, top_k, project?)` (`SearchDocsTool`) — hybrid retrieval;
+  hits carry both the short `source` filename and the full `path` for chaining.
+- `list_sources(project?)`, `get_document(path, project?)`,
+  `find_similar(path, top_k, project?)` (`CatalogTools`, Phase 8) — all backed
+  by `DocumentCatalog` in Core; path arguments accept full paths or bare
+  filenames (exact-then-wildcard resolution).
+- Scope for every tool resolves through
   `RtfmEnvironment.ResolveProjectScope` (`RTFM_PROJECT` default, per-call
   override, `*`/`all` sentinel).
 - The `[Description]` on each tool is *agent-facing prompt text*, not a doc
-  comment: it carries the recency/contradiction guidance (§2.13 B) and
-  cross-project attribution rules (§2.14). When behavior changes, update the
-  description in the same commit — a stale description misleads every agent
-  that connects.
+  comment: it carries the recency/contradiction guidance (§2.13 B),
+  cross-project attribution rules (§2.14), and cross-tool pointers (search →
+  get_document/find_similar). When behavior changes, update the description in
+  the same commit — a stale description misleads every agent that connects.
 - Tool results are records serialized by the SDK; return raw data, no prose.
-- Phase 8 (`get_document`, `list_sources`, `find_similar`) lands here as new
-  `[McpServerTool]` methods — same DI + description discipline.
+  Prefer explicit outcome fields (`found`, `vectorsAvailable`, `note`) over
+  throwing — a tool error reads as "RTFM is broken", a structured miss reads
+  as "adjust and retry".
