@@ -409,6 +409,13 @@ rtfm/
 Both executables (`Rtfm.Cli`, `Rtfm.Mcp`) depend on `Rtfm.Core`. The conversion,
 chunking, and search logic lives in Core and is shared.
 
+Each project carries its own `CLAUDE.md` with the project-local rules (Core:
+host-agnosticism + load-bearing invariants; Cli: stream contract + Spectre
+rules; Mcp: the stdout-is-sacred discipline; Tests: unit-only boundaries +
+pinned contracts). This file stays the source of truth for cross-cutting
+decisions; the per-project files hold what you must know *when editing there*.
+Keep them in sync when a phase moves a boundary.
+
 ---
 
 ## 5. Development plan
