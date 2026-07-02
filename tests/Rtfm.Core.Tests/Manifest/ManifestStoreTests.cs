@@ -18,36 +18,57 @@ public class ManifestStoreTests
     [Fact]
     public void Save_then_load_round_trips_entries()
     {
-        var store = ManifestStore.For(NewTempFolder(), "payments");
-        var manifest = new DocumentManifest();
-        manifest.Set("d:/docs/a.doc", new ManifestEntry(12345, 678));
-        manifest.Set("d:/docs/b.md", new ManifestEntry(99, 1));
+        // Manifests persist in the real per-user store — always a unique
+        // test-prefixed project name, always cleaned up (rtfm status lists
+        // leftovers, so litter is visible to the user).
+        var project = NewTestProject();
+        try
+        {
+            var store = ManifestStore.For(NewTempFolder(), project);
+            var manifest = new DocumentManifest();
+            manifest.Set("d:/docs/a.doc", new ManifestEntry(12345, 678));
+            manifest.Set("d:/docs/b.md", new ManifestEntry(99, 1));
 
-        store.Save(manifest);
-        var reloaded = store.Load();
+            store.Save(manifest);
+            var reloaded = store.Load();
 
-        Assert.Equal(2, reloaded.Count);
-        Assert.True(reloaded.TryGet("d:/docs/a.doc", out var a));
-        Assert.Equal(new ManifestEntry(12345, 678), a);
-        Assert.True(reloaded.TryGet("d:/docs/b.md", out var b));
-        Assert.Equal(new ManifestEntry(99, 1), b);
+            Assert.Equal(2, reloaded.Count);
+            Assert.True(reloaded.TryGet("d:/docs/a.doc", out var a));
+            Assert.Equal(new ManifestEntry(12345, 678), a);
+            Assert.True(reloaded.TryGet("d:/docs/b.md", out var b));
+            Assert.Equal(new ManifestEntry(99, 1), b);
+        }
+        finally
+        {
+            ManifestStore.PurgeManifests(project);
+        }
     }
 
     [Fact]
     public void Same_folder_different_projects_keep_independent_manifests()
     {
-        var folder = NewTempFolder();
-        var payments = ManifestStore.For(folder, "payments");
-        var billing = ManifestStore.For(folder, "billing");
+        var first = NewTestProject();
+        var second = NewTestProject();
+        try
+        {
+            var folder = NewTempFolder();
+            var firstStore = ManifestStore.For(folder, first);
+            var secondStore = ManifestStore.For(folder, second);
 
-        Assert.NotEqual(payments.FilePath, billing.FilePath);
+            Assert.NotEqual(firstStore.FilePath, secondStore.FilePath);
 
-        var m = new DocumentManifest();
-        m.Set("d:/docs/x.doc", new ManifestEntry(1, 2));
-        payments.Save(m);
+            var m = new DocumentManifest();
+            m.Set("d:/docs/x.doc", new ManifestEntry(1, 2));
+            firstStore.Save(m);
 
-        Assert.Equal(1, payments.Load().Count);
-        Assert.Equal(0, billing.Load().Count);
+            Assert.Equal(1, firstStore.Load().Count);
+            Assert.Equal(0, secondStore.Load().Count);
+        }
+        finally
+        {
+            ManifestStore.PurgeManifests(first);
+            ManifestStore.PurgeManifests(second);
+        }
     }
 
     [Fact]
@@ -85,4 +106,8 @@ public class ManifestStoreTests
     // A distinct, non-existent folder per test so runs don't collide.
     private static string NewTempFolder()
         => Path.Combine(Path.GetTempPath(), "rtfm-tests", Guid.NewGuid().ToString("n"));
+
+    // A unique project name a human would never use — safe to purge blindly.
+    private static string NewTestProject()
+        => $"test-manifest-{Guid.NewGuid():n}";
 }

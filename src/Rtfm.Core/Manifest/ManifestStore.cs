@@ -74,6 +74,42 @@ public sealed class ManifestStore
         return matches;
     }
 
+    /// <summary>
+    /// Every cached manifest: which folder/project it tracks and when it was
+    /// last saved (= the last time <c>index</c>/<c>watch</c> persisted state
+    /// for that pair). Unreadable files are skipped.
+    /// </summary>
+    public static IReadOnlyList<ManifestInfo> ListAll()
+    {
+        if (!Directory.Exists(ManifestsDirectory))
+        {
+            return [];
+        }
+
+        var manifests = new List<ManifestInfo>();
+        foreach (var file in Directory.EnumerateFiles(ManifestsDirectory, "*.json"))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<ManifestFile>(File.ReadAllText(file));
+                if (parsed?.Project is not null && parsed.Folder is not null)
+                {
+                    manifests.Add(new ManifestInfo(
+                        parsed.Project,
+                        parsed.Folder,
+                        parsed.Entries?.Count ?? 0,
+                        File.GetLastWriteTimeUtc(file)));
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or IOException)
+            {
+                // Skip — same tolerance as FindManifests.
+            }
+        }
+
+        return manifests.OrderBy(m => m.Project, StringComparer.Ordinal).ThenBy(m => m.Folder, StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>Deletes every manifest belonging to <paramref name="project"/>. Returns the count removed.</summary>
     public static int PurgeManifests(string project)
     {
@@ -144,3 +180,6 @@ public sealed class ManifestStore
 
     private sealed record EntryDto(long T, long L);
 }
+
+/// <summary>One cached watch manifest, for <c>rtfm status</c> (Phase 10).</summary>
+public sealed record ManifestInfo(string Project, string Folder, int TrackedFiles, DateTime UpdatedUtc);

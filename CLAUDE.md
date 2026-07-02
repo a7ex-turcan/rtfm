@@ -720,7 +720,7 @@ Vacation Policy` (PDF, 1.00), "gamma-cache port" → `infrastructure > Servers`
 (xlsx), "who is on call in week 2026-W28" → the roster row (CSV); pam corpus
 re-indexed to the same 111 chunks with its top hits intact. 81/81 tests.
 
-### Phase 10 — Observability: `rtfm status` + staleness
+### Phase 10 — Observability: `rtfm status` + staleness ✅ **Done**
 The index is a black box unless you curl OpenSearch. One read-only command:
 - `rtfm status` — per project: doc/chunk counts, newest/oldest
   `source_modified_at`, last `indexed_at`, vector coverage (% chunks embedded);
@@ -733,6 +733,23 @@ The index is a black box unless you curl OpenSearch. One read-only command:
   carries the date).
 **Done when:** `rtfm status` reports accurate counts/dates against the live
 index, and `--stale` flags a deliberately-backdated doc.
+
+*Delivered:* `StatusService` in Core — one size-0 aggregation (terms on
+`project`; per bucket: `cardinality(source_path)`, chunk `doc_count`, min/max
+`source_modified_at`, max `indexed_at`, and an `exists(content_vector)` filter
+sub-agg for vector coverage) — plus `ManifestStore.ListAll()` (project, folder,
+tracked files, last-saved). `rtfm status [--project] [--stale <days>]` renders
+an environment panel (cluster health, model cache, manifest count), a
+per-project table (docs/chunks/vectors %/source span/last indexed), the
+manifests table, and — with `--stale` — documents older than the window
+(client-side filter over `DocumentCatalog.ListSourcesAsync`; no new query
+machinery). `search_docs`'s description gained the drift hint: treat very old
+`source_modified_at` with suspicion, mention the date. Verified live: pam shows
+5 docs / 111 chunks / 100% vectors / correct span; a doc backdated to
+2024-01-15 was flagged by `--stale 365` at 899d. **Bonus catch:** the first
+live run exposed 21 leaked watch manifests from unit tests and pre-`purge`
+smoke runs — `ManifestStoreTests` now uses unique `test-…` project names and
+purges in `finally`, and the litter was swept. 84/84 tests.
 
 ### Phase 11 — Tier 3 retrieval: cross-encoder reranking
 The next precision lever after hybrid (§2.10): retrieve generously (the hybrid

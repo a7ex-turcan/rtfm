@@ -31,6 +31,8 @@ public static class SearchDocsTool
           and surface the disagreement to the user rather than silently choosing.
         - Across projects, differences are expected context — attribute each to its project; do NOT
           report them as contradictions.
+        - The corpus is manually exported and can drift from the live wiki: treat a very old
+          source_modified_at with suspicion, and mention the date when an answer rests on dated material.
 
         Follow-ups: each hit carries its `path` — pass it to get_document for the full page when the
         answer sprawls past the chunk, or to find_similar for related documents. list_sources shows
