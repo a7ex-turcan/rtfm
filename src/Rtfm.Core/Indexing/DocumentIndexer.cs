@@ -52,6 +52,7 @@ public sealed class DocumentIndexer(OpenSearchGateway gateway)
 
             var document = new
             {
+                project = chunk.Project,
                 source_path = chunk.SourcePath,
                 ordinal = chunk.Ordinal,
                 title = chunk.DocumentTitle,

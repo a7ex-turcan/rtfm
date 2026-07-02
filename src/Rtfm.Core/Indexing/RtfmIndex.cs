@@ -49,6 +49,7 @@ public static class RtfmIndex
           },
           "mappings": {
             "properties": {
+              "project":            { "type": "keyword" },
               "source_path":        { "type": "keyword" },
               "ordinal":            { "type": "integer" },
               "title":              { "type": "text", "analyzer": "rtfm_technical",

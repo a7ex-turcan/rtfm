@@ -69,7 +69,8 @@ public sealed class MarkdownChunker
                     HeadingPath: breadcrumb,
                     Text: window,
                     DocumentTitle: metadata.DocumentTitle,
-                    SourceModifiedAt: metadata.SourceModifiedAt));
+                    SourceModifiedAt: metadata.SourceModifiedAt,
+                    Project: metadata.Project));
             }
         }
 

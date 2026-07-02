@@ -37,8 +37,8 @@ static int PrintUsage()
           rtfm ping             Check connectivity to OpenSearch
           rtfm convert <path>   Convert one document to markdown (stdout)
           rtfm chunk <path>     Convert then show heading-aware chunks (stdout)
-          rtfm index <folder>   (Re)index a documentation folder into OpenSearch
-          rtfm search <query>   Tier 1 search over the index (stdout)
+          rtfm index <folder> [--project <name>]   (Re)index a folder (default project "default")
+          rtfm search <query> [--project <name>]    Tier 1 search (omit --project to span all)
           rtfm --help           Show this help
 
         Environment:

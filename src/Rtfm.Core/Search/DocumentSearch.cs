@@ -11,28 +11,39 @@ namespace Rtfm.Core.Search;
 /// </summary>
 public sealed class DocumentSearch(OpenSearchGateway gateway)
 {
-    public async Task<IReadOnlyList<SearchHit>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Runs a Tier 1 search. When <paramref name="project"/> is null/empty the
+    /// search spans all projects (§2.14); otherwise it is filtered to that one.
+    /// </summary>
+    public async Task<IReadOnlyList<SearchHit>> SearchAsync(string query, int topK = 5, string? project = null, CancellationToken cancellationToken = default)
     {
-        var body = BuildQuery(query, topK);
+        var body = BuildQuery(query, topK, project);
         var json = await gateway.SearchAsync(RtfmIndex.Name, body, cancellationToken).ConfigureAwait(false);
         return ParseHits(json);
     }
 
-    internal static string BuildQuery(string query, int topK)
+    internal static string BuildQuery(string query, int topK, string? project = null)
     {
+        var match = new
+        {
+            multi_match = new
+            {
+                query,
+                fields = new[] { "content", "heading_path^2", "title^2" },
+                type = "best_fields",
+            },
+        };
+
+        // No project → search everything; otherwise filter to the one project.
+        object queryClause = string.IsNullOrWhiteSpace(project)
+            ? match
+            : new { @bool = new { must = new object[] { match }, filter = new object[] { new { term = new Dictionary<string, string> { ["project"] = project } } } } };
+
         var request = new
         {
             size = topK,
-            query = new
-            {
-                multi_match = new
-                {
-                    query,
-                    fields = new[] { "content", "heading_path^2", "title^2" },
-                    type = "best_fields",
-                },
-            },
-            _source = new[] { "source_path", "heading_path", "title", "content", "source_modified_at" },
+            query = queryClause,
+            _source = new[] { "project", "source_path", "heading_path", "title", "content", "source_modified_at" },
         };
 
         return JsonSerializer.Serialize(request);
@@ -48,6 +59,7 @@ public sealed class DocumentSearch(OpenSearchGateway gateway)
             var source = hit.GetProperty("_source");
             hits.Add(new SearchHit(
                 Score: hit.TryGetProperty("_score", out var score) && score.ValueKind == JsonValueKind.Number ? score.GetDouble() : 0,
+                Project: GetString(source, "project") ?? string.Empty,
                 SourcePath: GetString(source, "source_path") ?? string.Empty,
                 HeadingPath: GetString(source, "heading_path") ?? string.Empty,
                 Title: GetString(source, "title"),

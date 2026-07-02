@@ -185,7 +185,8 @@ search tech. Rules:
   cheap leverage that helps *both* question types.
 - Add modest overlap so answers spanning a boundary aren't lost.
 - Store metadata on every chunk: **source file path** (see §2.9), **heading
-  path**, and **timestamps** (`source_modified_at`, `indexed_at`; see §2.13).
+  path**, **timestamps** (`source_modified_at`, `indexed_at`; see §2.13), and
+  **`project`** (see §2.14).
 
 ### 2.8 Watch mode: FileSystemWatcher, handled correctly
 `System.IO.FileSystemWatcher` is the mechanism, but the naive version
@@ -246,9 +247,11 @@ one without the embedding weight:
 
 ### 2.11 MCP tool surface (MVP)
 One tool to start:
-- `search_docs(query: string, top_k: int = 5)` → ranked chunks, each with its
-  heading breadcrumb, source file, text, and `source_modified_at` (for recency /
-  contradiction reasoning — see §2.13).
+- `search_docs(query: string, top_k: int = 5, project?: string)` → ranked
+  chunks, each with its heading breadcrumb, source file, text,
+  `source_modified_at` (recency / contradiction reasoning — §2.13), and
+  `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
+  arg overrides per call (a specific project, or all).
 
 Possible later additions (don't build yet): `get_document(path)` to fetch a full
 page, `list_sources()` to enumerate indexed docs.
@@ -320,6 +323,31 @@ Shipped in layers — **A + B are committed; C is deferred**.
   ingested chunk against *similar* existing chunks from other documents needs
   semantic similarity, so it waits for Tier-2 embeddings (§2.10). Query-time LLM
   reasoning (B) comes first.
+
+### 2.14 Per-project segregation
+A dev machine holds many projects, each with its own docs; the LLM must not blur
+them together. Every chunk carries a **`project`** keyword field, set explicitly
+at index time and used to scope retrieval. **Single shared index + filter**, not
+index-per-project — trivial cross-project queries, one mapping, and "drop a
+project" reuses delete-by-query (§2.9).
+
+- **Index:** `rtfm index <folder> --project <name>` (default `"default"`). A
+  file belongs to one project at a time; re-indexing it under a new name moves
+  it.
+- **Consume (Phase 4):** an `RTFM_PROJECT` env var in `.mcp.json` sets the
+  default scope. Because `.mcp.json` is already project-scoped and committed per
+  repo (§6), each repo auto-scopes RTFM to its own project — near-zero ergonomic
+  cost.
+  - `RTFM_PROJECT=payments` → retrieval filtered to that project (the
+    confusion-avoiding default).
+  - unset/empty → retrieval spans **all** projects.
+  - `search_docs` takes an optional `project` argument to override per call (a
+    specific other project, or all) — the "compare across projects" path.
+- **Provenance:** every hit carries its `project` (like `source_modified_at`),
+  so even all-projects mode is unambiguous about which doc came from where.
+- **Contradiction interplay (§2.13 B):** *within* a project, newer supersedes /
+  flag conflicts; *across* projects, differences are **expected** — attribute
+  them by project, do not flag them as contradictions.
 
 ---
 
@@ -446,16 +474,21 @@ analyzer = whitespace + `word_delimiter_graph` with `preserve_original`, so
 `docProps/core.xml` → mtime fallback), `OpenSearchGateway` index/search ops
 (raw JSON, low-level client), `DocumentIndexer` (per-doc delete-by-query + bulk
 upsert, deterministic `_id` = `path#ordinal` → idempotent re-index), and
-`DocumentSearch` (Tier 1 BM25 `multi_match`). CLI: `rtfm index <folder>`,
-`rtfm search <query>`. Verified on the real corpus: 111 chunks / 5 docs, re-index
-stays 111, technical + conceptual queries return sensible hits carrying
-`source_modified_at`.
+`DocumentSearch` (Tier 1 BM25 `multi_match`, optional `project` filter). CLI:
+`rtfm index <folder> [--project]`, `rtfm search <query> [--project]`. Every chunk
+also carries a **`project`** keyword (§2.14). Verified on the real corpus: 111
+chunks / 5 docs, re-index stays 111, technical + conceptual queries return
+sensible hits carrying `source_modified_at` and `project`; project filter scopes
+correctly (pam → hits, other → 0, no flag → all).
 
 ### Phase 4 — MCP server (Tier 1 retrieval)
-stdio server exposing `search_docs(query, top_k)`. Tier 1 BM25 query across
-keyword + text. Returns chunks with breadcrumb + source + `source_modified_at`,
-and instructs the agent to prefer newer sources and flag contradictions
-(§2.13 B). Wire into Claude Code via project-scoped `.mcp.json` (§6).
+stdio server exposing `search_docs(query, top_k, project?)`. Tier 1 BM25 query
+across keyword + text. Returns chunks with breadcrumb + source +
+`source_modified_at` + `project`, scoped by `RTFM_PROJECT` (optional per-call
+`project` override; §2.14), and instructs the agent to prefer newer sources and
+flag contradictions within a project but attribute cross-project differences by
+project (§2.13 B, §2.14). Wire into Claude Code via project-scoped `.mcp.json`
+(§6).
 **Done when:** from inside Claude Code, asking "what's the endpoint to GET X"
 retrieves the right passage via the tool; and when two docs disagree, the newer
 is preferred and the conflict is surfaced to the user.

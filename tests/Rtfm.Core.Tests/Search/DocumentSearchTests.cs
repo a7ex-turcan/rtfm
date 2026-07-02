@@ -20,4 +20,23 @@ public class DocumentSearchTests
         Assert.Contains("content", fields);
         Assert.Contains("heading_path^2", fields);
     }
+
+    [Fact]
+    public void No_project_means_no_filter_clause()
+    {
+        using var doc = JsonDocument.Parse(DocumentSearch.BuildQuery("anything", topK: 5, project: null));
+        // Bare multi_match, no bool/filter.
+        Assert.True(doc.RootElement.GetProperty("query").TryGetProperty("multi_match", out _));
+    }
+
+    [Fact]
+    public void A_project_adds_a_term_filter()
+    {
+        using var doc = JsonDocument.Parse(DocumentSearch.BuildQuery("anything", topK: 5, project: "payments"));
+        var boolQuery = doc.RootElement.GetProperty("query").GetProperty("bool");
+
+        Assert.True(boolQuery.GetProperty("must")[0].TryGetProperty("multi_match", out _));
+        var term = boolQuery.GetProperty("filter")[0].GetProperty("term");
+        Assert.Equal("payments", term.GetProperty("project").GetString());
+    }
 }

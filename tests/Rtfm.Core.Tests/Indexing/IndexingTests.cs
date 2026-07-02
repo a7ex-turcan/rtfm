@@ -12,6 +12,7 @@ public class IndexingTests
         using var doc = JsonDocument.Parse(RtfmIndex.DefinitionJson);
         var props = doc.RootElement.GetProperty("mappings").GetProperty("properties");
 
+        Assert.Equal("keyword", props.GetProperty("project").GetProperty("type").GetString());
         Assert.Equal("keyword", props.GetProperty("source_path").GetProperty("type").GetString());
         Assert.Equal("date", props.GetProperty("source_modified_at").GetProperty("type").GetString());
         Assert.Equal("date", props.GetProperty("indexed_at").GetProperty("type").GetString());
@@ -27,8 +28,8 @@ public class IndexingTests
         var indexedAt = new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);
         var chunks = new List<Chunk>
         {
-            new(0, "d:/docs/a.doc", "A > B", "body one", "A", new DateTimeOffset(2026, 6, 19, 0, 0, 0, TimeSpan.Zero)),
-            new(1, "d:/docs/a.doc", "A > C", "body two", DocumentTitle: null, SourceModifiedAt: null),
+            new(0, "d:/docs/a.doc", "A > B", "body one", "A", new DateTimeOffset(2026, 6, 19, 0, 0, 0, TimeSpan.Zero), Project: "payments"),
+            new(1, "d:/docs/a.doc", "A > C", "body two", DocumentTitle: null, SourceModifiedAt: null, Project: "payments"),
         };
 
         var payload = DocumentIndexer.BuildBulkPayload(chunks, indexedAt);
@@ -43,6 +44,7 @@ public class IndexingTests
         using (var first = JsonDocument.Parse(lines[1]))
         {
             var root = first.RootElement;
+            Assert.Equal("payments", root.GetProperty("project").GetString());
             Assert.Equal("A", root.GetProperty("title").GetString());
             Assert.Equal("A > B\n\nbody one", root.GetProperty("content").GetString());
             Assert.True(root.TryGetProperty("source_modified_at", out _));

@@ -1,10 +1,11 @@
 namespace Rtfm.Core.Chunking;
 
-/// <summary>Document-level facts every chunk of a document carries (§2.7, §2.13).</summary>
+/// <summary>Document-level facts every chunk of a document carries (§2.7, §2.13, §2.14).</summary>
 public sealed record ChunkMetadata(
     string SourcePath,
     string? DocumentTitle,
-    DateTimeOffset? SourceModifiedAt);
+    DateTimeOffset? SourceModifiedAt,
+    string Project = "default");
 
 /// <summary>
 /// One indexable unit: a section's body plus the heading breadcrumb that locates
@@ -18,7 +19,8 @@ public sealed record Chunk(
     string HeadingPath,
     string Text,
     string? DocumentTitle,
-    DateTimeOffset? SourceModifiedAt)
+    DateTimeOffset? SourceModifiedAt,
+    string Project = "default")
 {
     /// <summary>What actually gets indexed / embedded: breadcrumb + body.</summary>
     public string ContentWithBreadcrumb =>

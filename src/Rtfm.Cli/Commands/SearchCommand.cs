@@ -11,23 +11,25 @@ internal static class SearchCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 0)
+        var (queryParts, project) = ParseArgs(args);
+        if (queryParts.Count == 0)
         {
-            Console.Error.WriteLine("usage: rtfm search <query...>");
+            Console.Error.WriteLine("usage: rtfm search <query...> [--project <name>|--all]");
             return 2;
         }
 
-        var query = string.Join(' ', args);
+        var query = string.Join(' ', queryParts);
 
         try
         {
-            var hits = await new DocumentSearch(new OpenSearchGateway()).SearchAsync(query, topK: 5).ConfigureAwait(false);
+            var hits = await new DocumentSearch(new OpenSearchGateway()).SearchAsync(query, topK: 5, project: project).ConfigureAwait(false);
 
-            Console.Error.WriteLine($"# {hits.Count} hits for \"{query}\"");
+            var scope = string.IsNullOrEmpty(project) ? "all projects" : $"project '{project}'";
+            Console.Error.WriteLine($"# {hits.Count} hits for \"{query}\" ({scope})");
             foreach (var hit in hits)
             {
                 var modified = hit.SourceModifiedAt?.ToString("yyyy-MM-dd") ?? "unknown";
-                Console.Out.WriteLine($"── score={hit.Score:F2}  modified={modified}");
+                Console.Out.WriteLine($"── score={hit.Score:F2}  project={hit.Project}  modified={modified}");
                 Console.Out.WriteLine($"   {hit.HeadingPath}");
                 Console.Out.WriteLine($"   {Path.GetFileName(hit.SourcePath)}");
                 var snippet = hit.Content.Length > 240 ? hit.Content[..240] + "…" : hit.Content;
@@ -42,5 +44,30 @@ internal static class SearchCommand
             Console.Error.WriteLine($"rtfm search: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>Splits query words from flags. Project defaults to null (all projects); --project scopes it.</summary>
+    private static (List<string> Query, string? Project) ParseArgs(string[] args)
+    {
+        var query = new List<string>();
+        string? project = null;
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--project" or "-p" when i + 1 < args.Length:
+                    project = args[++i];
+                    break;
+                case "--all":
+                    project = null;
+                    break;
+                default:
+                    query.Add(args[i]);
+                    break;
+            }
+        }
+
+        return (query, project);
     }
 }

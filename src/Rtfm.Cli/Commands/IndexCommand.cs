@@ -17,13 +17,14 @@ internal static class IndexCommand
 
     public static async Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 0)
+        var (positional, project) = ParseArgs(args);
+        if (positional is null)
         {
-            Console.Error.WriteLine("usage: rtfm index <folder>");
+            Console.Error.WriteLine("usage: rtfm index <folder> [--project <name>]");
             return 2;
         }
 
-        var folder = args[0];
+        var folder = positional;
         if (!Directory.Exists(folder))
         {
             Console.Error.WriteLine($"rtfm index: folder not found: {folder}");
@@ -49,6 +50,7 @@ internal static class IndexCommand
         Console.Error.WriteLine(created
             ? $"Created index '{RtfmIndex.Name}'."
             : $"Index '{RtfmIndex.Name}' already exists.");
+        Console.Error.WriteLine($"Project: {project}");
 
         var indexedAt = DateTimeOffset.UtcNow;
         int docCount = 0, chunkCount = 0, failed = 0;
@@ -61,7 +63,7 @@ internal static class IndexCommand
                 var sourcePath = PathNormalizer.Normalize(file);
                 var modifiedAt = conversion.SourceModifiedAt ?? new DateTimeOffset(File.GetLastWriteTimeUtc(file), TimeSpan.Zero);
 
-                var metadata = new ChunkMetadata(sourcePath, conversion.Title, modifiedAt);
+                var metadata = new ChunkMetadata(sourcePath, conversion.Title, modifiedAt, project);
                 var chunks = chunker.Chunk(conversion.Markdown, metadata);
 
                 var n = await indexer.IndexDocumentAsync(chunks, indexedAt).ConfigureAwait(false);
@@ -78,8 +80,34 @@ internal static class IndexCommand
 
         await indexer.RefreshAsync().ConfigureAwait(false);
 
-        Console.Error.WriteLine($"Done: {docCount} docs, {chunkCount} chunks indexed into '{RtfmIndex.Name}'"
+        Console.Error.WriteLine($"Done: {docCount} docs, {chunkCount} chunks indexed into '{RtfmIndex.Name}' (project '{project}')"
             + (failed > 0 ? $", {failed} failed." : "."));
         return failed > 0 && docCount == 0 ? 1 : 0;
+    }
+
+    /// <summary>Returns the folder (null if missing) and the project name (default "default").</summary>
+    private static (string? Folder, string Project) ParseArgs(string[] args)
+    {
+        string? folder = null;
+        var project = "default";
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] is "--project" or "-p")
+            {
+                if (i + 1 >= args.Length)
+                {
+                    return (null, project);
+                }
+
+                project = args[++i];
+            }
+            else
+            {
+                folder ??= args[i];
+            }
+        }
+
+        return (folder, project);
     }
 }
