@@ -57,5 +57,36 @@ public class IndexingTests
             Assert.False(second.RootElement.TryGetProperty("title", out _));
             Assert.False(second.RootElement.TryGetProperty("source_modified_at", out _));
         }
+
+        // No vectors supplied → no content_vector field (Tier 1 shape unchanged).
+        using (var first = JsonDocument.Parse(lines[1]))
+        {
+            Assert.False(first.RootElement.TryGetProperty("content_vector", out _));
+        }
+    }
+
+    [Fact]
+    public void Bulk_payload_carries_vectors_when_supplied()
+    {
+        var chunks = new List<Chunk> { new(0, "d:/docs/a.doc", "A", "body", "A", null) };
+        List<float[]> vectors = [[0.25f, -0.5f]];
+
+        var payload = DocumentIndexer.BuildBulkPayload(chunks, DateTimeOffset.UnixEpoch, vectors);
+        var lines = payload.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        using var doc = JsonDocument.Parse(lines[1]);
+        var vector = doc.RootElement.GetProperty("content_vector");
+        Assert.Equal(2, vector.GetArrayLength());
+        Assert.Equal(0.25f, vector[0].GetSingle());
+        Assert.Equal(-0.5f, vector[1].GetSingle());
+    }
+
+    [Fact]
+    public void Bulk_payload_rejects_misaligned_vectors()
+    {
+        var chunks = new List<Chunk> { new(0, "d:/docs/a.doc", "A", "body", "A", null) };
+
+        Assert.Throws<ArgumentException>(
+            () => DocumentIndexer.BuildBulkPayload(chunks, DateTimeOffset.UnixEpoch, vectors: []));
     }
 }

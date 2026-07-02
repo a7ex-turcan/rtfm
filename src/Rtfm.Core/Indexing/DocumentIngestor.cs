@@ -1,14 +1,17 @@
 using Rtfm.Core.Chunking;
 using Rtfm.Core.Conversion;
+using Rtfm.Core.Embeddings;
 
 namespace Rtfm.Core.Indexing;
 
 /// <summary>
 /// The single "ingest one file" path shared by <c>rtfm index</c> (batch) and
-/// <c>rtfm watch</c> (incremental): convert → chunk → bulk-upsert, plus
+/// <c>rtfm watch</c> (incremental): convert → chunk → embed → bulk-upsert, plus
 /// remove-by-path. Keeping this in Core means both entry points agree on the
 /// supported formats, the normalized source-path key (§2.12), and the
-/// modified-date fallback (§2.13 A).
+/// modified-date fallback (§2.13 A). With an <see cref="ITextEmbedder"/> each
+/// chunk's indexed text is embedded into <c>content_vector</c> (§2.10 Tier 2);
+/// without one, chunks index lexical-only exactly as before.
 /// </summary>
 public sealed class DocumentIngestor
 {
@@ -19,10 +22,12 @@ public sealed class DocumentIngestor
     private readonly DocumentConverter _converter;
     private readonly MarkdownChunker _chunker;
     private readonly DocumentIndexer _indexer;
+    private readonly ITextEmbedder? _embedder;
 
-    public DocumentIngestor(DocumentIndexer indexer, DocumentConverter? converter = null, MarkdownChunker? chunker = null)
+    public DocumentIngestor(DocumentIndexer indexer, ITextEmbedder? embedder = null, DocumentConverter? converter = null, MarkdownChunker? chunker = null)
     {
         _indexer = indexer;
+        _embedder = embedder;
         _converter = converter ?? new DocumentConverter();
         _chunker = chunker ?? new MarkdownChunker();
     }
@@ -62,7 +67,13 @@ public sealed class DocumentIngestor
             return 0;
         }
 
-        return await _indexer.IndexDocumentAsync(chunks, indexedAt, cancellationToken).ConfigureAwait(false);
+        // Embed the same text that gets indexed (breadcrumb + body, §2.7) so
+        // lexical and semantic retrieval see an identical document.
+        var vectors = _embedder is null
+            ? null
+            : chunks.Select(c => _embedder.Embed(c.ContentWithBreadcrumb)).ToList();
+
+        return await _indexer.IndexDocumentAsync(chunks, indexedAt, vectors, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Removes every chunk for the document at <paramref name="path"/> (delete/rename handling).</summary>

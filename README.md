@@ -38,9 +38,11 @@ Three independent processes, each with its own lifecycle:
 
 The CLI converts each `.docx` (Mammoth → ReverseMarkdown), splits it into
 heading-aware chunks with breadcrumb context, and bulk-indexes them. Retrieval
-ships in tiers: **Tier 1** is a tuned BM25 lexical search (excellent for
-technical lookups); **Tier 2** adds local in-process embeddings for hybrid
-semantic search. See [`CLAUDE.md`](./CLAUDE.md) for the full design and rationale.
+is **hybrid**: a tuned BM25 lexical search (excellent for technical lookups)
+fused with local in-process semantic embeddings (all-MiniLM-L6-v2 via ONNX
+Runtime — auto-downloaded once, ~90 MB, cached per user; without it search
+degrades gracefully to lexical-only). See [`CLAUDE.md`](./CLAUDE.md) for the
+full design and rationale.
 
 ## Requirements
 
@@ -53,10 +55,6 @@ Runs on Windows, macOS, and Linux.
 
 ## Getting started
 
-> **Status:** early development. The scaffold, local OpenSearch, and the
-> `rtfm ping` health check work today (Phase 0). The `index` / `watch` commands
-> below describe the intended workflow and are not wired up yet.
-
 ```bash
 # 1. Start the local search store
 docker compose up -d
@@ -64,16 +62,16 @@ docker compose up -d
 # 2. Build
 dotnet build -c Release
 
-# 3. Confirm the CLI can reach OpenSearch   ← works today
+# 3. Confirm the CLI can reach OpenSearch
 dotnet run --project src/Rtfm.Cli -- ping
 
-# 4. Index your documentation               ← works today
+# 4. Index your documentation (first run downloads the embedding model, ~90 MB)
 dotnet run --project src/Rtfm.Cli -- index ./docs
 
-# 5. Search it from the CLI                  ← works today
+# 5. Search it from the CLI
 dotnet run --project src/Rtfm.Cli -- search "how are roles mapped to functions"
 
-# 6. (optional) Keep the index fresh as docs change   (coming: Phase 5)
+# 6. (optional) Keep the index fresh as docs change
 dotnet run --project src/Rtfm.Cli -- watch ./docs
 ```
 

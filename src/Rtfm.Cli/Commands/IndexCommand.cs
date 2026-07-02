@@ -35,8 +35,9 @@ internal static class IndexCommand
             return 1;
         }
 
+        using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
         var indexer = new DocumentIndexer(new OpenSearchGateway());
-        var ingestor = new DocumentIngestor(indexer);
+        var ingestor = new DocumentIngestor(indexer, embedder);
 
         var created = await ingestor.EnsureIndexAsync().ConfigureAwait(false);
         Console.Error.WriteLine(created

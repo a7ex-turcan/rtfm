@@ -19,6 +19,34 @@ public static class RtfmIndex
     /// <summary>Embedding dimension reserved for Tier 2 (e.g. bge-small / MiniLM = 384).</summary>
     public const int VectorDimension = 384;
 
+    /// <summary>Search pipeline that fuses the hybrid query's BM25 + kNN scores (§2.10 Tier 2).</summary>
+    public const string HybridPipelineName = "rtfm-hybrid";
+
+    /// <summary>
+    /// Score fusion for hybrid queries. OpenSearch 2.17 has no RRF processor
+    /// (that shipped in 2.19), so per §2.10 this is the score-normalization
+    /// route: min–max normalize each sub-query's scores to [0,1], then combine
+    /// with an equal-weight arithmetic mean. Weight order matches the hybrid
+    /// query's <c>queries</c> array: [lexical, semantic].
+    /// </summary>
+    public const string HybridPipelineJson =
+        """
+        {
+          "description": "RTFM hybrid score fusion: min_max normalization, equal-weight arithmetic mean (BM25 + kNN)",
+          "phase_results_processors": [
+            {
+              "normalization-processor": {
+                "normalization": { "technique": "min_max" },
+                "combination": {
+                  "technique": "arithmetic_mean",
+                  "parameters": { "weights": [0.5, 0.5] }
+                }
+              }
+            }
+          ]
+        }
+        """;
+
     public static string DefinitionJson =>
         $$"""
         {

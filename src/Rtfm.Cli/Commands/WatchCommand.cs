@@ -27,8 +27,9 @@ internal static class WatchCommand
             return 1;
         }
 
+        using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
         var indexer = new DocumentIndexer(new OpenSearchGateway());
-        var ingestor = new DocumentIngestor(indexer);
+        var ingestor = new DocumentIngestor(indexer, embedder);
         var manifestStore = ManifestStore.For(folder, project);
         var watcher = new FolderWatcher(folder, project, ingestor, manifestStore, Console.Error.WriteLine);
 

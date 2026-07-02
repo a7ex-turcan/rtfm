@@ -365,7 +365,7 @@ project" reuses delete-by-query (§2.9).
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
-| Embeddings (Tier 2) | local ONNX Runtime, small embedding model |
+| Embeddings (Tier 2) | `Microsoft.ML.OnnxRuntime` + `Microsoft.ML.Tokenizers`, all-MiniLM-L6-v2 (384-dim, auto-downloaded + cached) |
 | File watching | `System.IO.FileSystemWatcher` |
 
 > Pin exact package versions at build time — verify latest stable against NuGet
@@ -375,7 +375,9 @@ project" reuses delete-by-query (§2.9).
 > **2.17.1** (Phase 0). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
 > `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b),
 > `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
-> **10.0.9** (Phase 4). Bump deliberately, not automatically.
+> **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +
+> `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). Bump deliberately, not
+> automatically.
 
 ---
 
@@ -536,12 +538,39 @@ path for file I/O (a lower-cased key won't open on a case-sensitive OS).
 index` still does not prune docs deleted since the last run (unchanged from
 Phase 3); watch's reconcile is what prunes.
 
-### Phase 6 — Semantic tier (deferred)
+### Phase 6 — Semantic tier ✅ **Done**
 Local in-process embeddings, backfill `knn_vector`, hybrid BM25 + kNN with RRF /
 normalization via search pipeline. Validate the *conceptual* question half.
 **Done when:** "what does Bundle mean" returns the defining passage even when the
 query shares few exact words with the doc — without regressing Tier 1 technical
 lookups.
+
+*Delivered:* `Rtfm.Core/Embeddings` — `ITextEmbedder`, `LocalEmbedder`
+(**all-MiniLM-L6-v2** via ONNX Runtime CPU + `Microsoft.ML.Tokenizers`
+`BertTokenizer`; mean-pool + L2-normalize, so the mapping's `l2` space ranks
+like cosine), and `EmbeddingModelStore` (auto-downloads model.onnx + vocab.txt
+from HuggingFace once, cached under `LocalApplicationData/rtfm/models`;
+`RTFM_MODEL_DIR` overrides for offline pre-provisioning). Ingest embeds each
+chunk's `ContentWithBreadcrumb` into `content_vector` — the Phase 3 mapping was
+already correct (384-dim, hnsw, lucene engine), so this was a true backfill:
+re-running `rtfm index` populates vectors, no mapping change. Retrieval:
+**OpenSearch 2.17 has no RRF processor (that shipped in 2.19)**, so the §2.10
+"confirm wiring" question resolved to the score-normalization route — a
+`rtfm-hybrid` search pipeline (`normalization-processor`, min_max +
+equal-weight arithmetic_mean) fusing a `hybrid` query's BM25 clause with a kNN
+clause (k = clamp(5·topK, 25, 100); the project filter rides on *both* clauses —
+`bool` filter lexically, the knn `filter` param vectorside). The client's typed
+search has no `search_pipeline` param — passed via the request query string.
+**Degradation:** no model (e.g. offline first run) → CLI warns and runs
+lexical-only; `DocumentSearch` also falls back to Tier 1 at query time if
+embedding fails, so the MCP server keeps serving. Verified live on the real
+corpus: the conceptual probe ("who decides what data a user is allowed to see")
+was BM25-ranked #2 behind an irrelevant Location chunk; hybrid puts the ABAC
+Objective chunk **#1 at 0.98 vs 0.50**. Technical lookups unregressed ("roles
+mapped to functions" and exact-token `BUSINESS_LINE__C` keep their top hits);
+project scoping verified through the hybrid path; MCP re-verified over raw
+stdio (pure JSON-RPC stdout, hybrid ranking, ~0.5s tool call, embedder lazy so
+the handshake stays instant).
 
 ---
 

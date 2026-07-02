@@ -15,6 +15,9 @@ public static class RtfmEnvironment
     /// <summary>Environment variable naming the project the MCP server is scoped to (§2.14).</summary>
     public const string ProjectVariable = "RTFM_PROJECT";
 
+    /// <summary>Environment variable overriding where embedding model files are cached (Tier 2, §2.10).</summary>
+    public const string ModelDirectoryVariable = "RTFM_MODEL_DIR";
+
     /// <summary>
     /// Returns the configured OpenSearch endpoint, falling back to the local default.
     /// </summary>
@@ -44,5 +47,27 @@ public static class RtfmEnvironment
 
         value = value.Trim();
         return value is "*" or "all" ? null : value;
+    }
+
+    /// <summary>
+    /// Directory the embedding model files are cached in. Defaults to
+    /// <c>LocalApplicationData/rtfm/models</c>; <c>RTFM_MODEL_DIR</c> overrides
+    /// (e.g. an offline pre-provisioned copy).
+    /// </summary>
+    public static string ResolveModelDirectory()
+    {
+        var value = Environment.GetEnvironmentVariable(ModelDirectoryVariable);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            baseDir = Path.GetTempPath();
+        }
+
+        return Path.Combine(baseDir, "rtfm", "models");
     }
 }

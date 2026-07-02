@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenSearch.Net;
 using Rtfm.Core.Configuration;
+using OsHttpMethod = global::OpenSearch.Net.HttpMethod;
 
 namespace Rtfm.Core.OpenSearch;
 
@@ -128,15 +129,42 @@ public sealed class OpenSearchGateway
         EnsureSuccess(response, $"refresh index '{index}'");
     }
 
-    /// <summary>Runs a raw query body and returns the raw JSON response.</summary>
-    public async Task<string> SearchAsync(string index, string queryJson, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Runs a raw query body and returns the raw JSON response. When
+    /// <paramref name="searchPipeline"/> is set, the query runs through that
+    /// search pipeline (hybrid score fusion, §2.10 Tier 2).
+    /// </summary>
+    public async Task<string> SearchAsync(string index, string queryJson, string? searchPipeline = null, CancellationToken cancellationToken = default)
     {
+        // The client has no first-class search_pipeline param in this version;
+        // passing it through the request's query string works on any endpoint.
+        SearchRequestParameters? parameters = null;
+        if (searchPipeline is not null)
+        {
+            parameters = new SearchRequestParameters();
+            parameters.QueryString["search_pipeline"] = searchPipeline;
+        }
+
         var response = await _client
-            .SearchAsync<StringResponse>(index, PostData.String(queryJson), ctx: cancellationToken)
+            .SearchAsync<StringResponse>(index, PostData.String(queryJson), parameters, ctx: cancellationToken)
             .ConfigureAwait(false);
 
         EnsureSuccess(response, $"search '{index}'");
         return response.Body;
+    }
+
+    /// <summary>Creates or replaces a search pipeline (idempotent PUT).</summary>
+    public async Task PutSearchPipelineAsync(string name, string definitionJson, CancellationToken cancellationToken = default)
+    {
+        var response = await _client
+            .DoRequestAsync<StringResponse>(
+                OsHttpMethod.PUT,
+                $"_search/pipeline/{Uri.EscapeDataString(name)}",
+                cancellationToken,
+                PostData.String(definitionJson))
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"put search pipeline '{name}'");
     }
 
     private static void EnsureSuccess(StringResponse response, string operation)

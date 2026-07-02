@@ -5,7 +5,8 @@ namespace Rtfm.Cli.Commands;
 
 /// <summary>
 /// <c>rtfm search &lt;query&gt;</c> — dev aid to verify indexing/retrieval from
-/// the CLI (Tier 1 BM25). Phase 4 exposes the same search over MCP.
+/// the CLI (Tier 2 hybrid when the model is available, else Tier 1 BM25).
+/// The MCP server exposes the same search.
 /// </summary>
 internal static class SearchCommand
 {
@@ -22,7 +23,9 @@ internal static class SearchCommand
 
         try
         {
-            var hits = await new DocumentSearch(new OpenSearchGateway()).SearchAsync(query, topK: 5, project: project).ConfigureAwait(false);
+            using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
+            var search = new DocumentSearch(new OpenSearchGateway(), embedder, Console.Error.WriteLine);
+            var hits = await search.SearchAsync(query, topK: 5, project: project).ConfigureAwait(false);
 
             var scope = string.IsNullOrEmpty(project) ? "all projects" : $"project '{project}'";
             Console.Error.WriteLine($"# {hits.Count} hits for \"{query}\" ({scope})");
