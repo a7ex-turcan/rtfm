@@ -37,7 +37,44 @@ switch (args[0])
 
 static int PrintUsage()
 {
-    Ui.Out.Write(new FigletText("RTFM").Color(Ui.Accent));
+    // The logo: an orange prompt chevron, RTFM in the terminal's own foreground,
+    // and an orange block cursor. Rendered by hand (three colored segments per
+    // row) — a figlet font can't do per-glyph color.
+    string[] prompt =
+    [
+        "██╗   ",
+        "╚██╗  ",
+        " ╚██╗ ",
+        " ██╔╝ ",
+        "██╔╝  ",
+        "╚═╝   ",
+    ];
+    string[] word =
+    [
+        "██████╗ ████████╗███████╗███╗   ███╗",
+        "██╔══██╗╚══██╔══╝██╔════╝████╗ ████║",
+        "██████╔╝   ██║   █████╗  ██╔████╔██║",
+        "██╔══██╗   ██║   ██╔══╝  ██║╚██╔╝██║",
+        "██║  ██║   ██║   ██║     ██║ ╚═╝ ██║",
+        "╚═╝  ╚═╝   ╚═╝   ╚═╝     ╚═╝     ╚═╝",
+    ];
+    string[] cursor =
+    [
+        "████",
+        "████",
+        "████",
+        "████",
+        "████",
+        "████",
+    ];
+
+    Ui.Out.WriteLine();
+    for (var i = 0; i < prompt.Length; i++)
+    {
+        Ui.Out.MarkupLine($"[{Ui.Accent}]{prompt[i]}[/] {word[i]}  [{Ui.Accent}]{cursor[i]}[/]");
+    }
+
+    Ui.Out.WriteLine();
     Ui.Out.MarkupLine("[bold]R[/]etrieval [bold]T[/]ool [bold]F[/]or [bold]M[/]anuals — [dim]the answer was in the docs all along.[/]");
     Ui.Out.WriteLine();
 
