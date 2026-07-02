@@ -36,7 +36,7 @@ public sealed class FolderWatcher
     private readonly string _project;
     private readonly DocumentIngestor _ingestor;
     private readonly ManifestStore _manifestStore;
-    private readonly Action<string> _log;
+    private readonly Action<WatchEvent> _onEvent;
     private readonly TimeSpan _debounceWindow;
 
     private readonly ConcurrentDictionary<string, Pending> _pending = new(StringComparer.Ordinal);
@@ -48,14 +48,14 @@ public sealed class FolderWatcher
         string project,
         DocumentIngestor ingestor,
         ManifestStore manifestStore,
-        Action<string>? log = null,
+        Action<WatchEvent>? onEvent = null,
         TimeSpan? debounceWindow = null)
     {
         _folder = folder;
         _project = project;
         _ingestor = ingestor;
         _manifestStore = manifestStore;
-        _log = log ?? (_ => { });
+        _onEvent = onEvent ?? (_ => { });
         _debounceWindow = debounceWindow ?? TimeSpan.FromMilliseconds(500);
     }
 
@@ -71,7 +71,7 @@ public sealed class FolderWatcher
 
         using var watcher = CreateWatcher();
         watcher.EnableRaisingEvents = true;
-        _log($"Watching {_folder} (project '{_project}') — Ctrl+C to stop.");
+        _onEvent(new WatchEvent(WatchEventKind.Watching, Path: _folder, Detail: $"{_folder} (project '{_project}') — Ctrl+C to stop."));
 
         try
         {
@@ -113,7 +113,7 @@ public sealed class FolderWatcher
             Enqueue(ChangeKind.Delete, e.OldFullPath);
             Enqueue(ChangeKind.Upsert, e.FullPath);
         };
-        watcher.Error += (_, e) => _log($"  watcher error: {e.GetException().Message}");
+        watcher.Error += (_, e) => _onEvent(new WatchEvent(WatchEventKind.WatcherError, Detail: e.GetException().Message));
 
         return watcher;
     }
@@ -163,11 +163,11 @@ public sealed class FolderWatcher
                 var n = await _ingestor.IngestFileAsync(original, _project, indexedAt, cancellationToken).ConfigureAwait(false);
                 _manifest.Set(key, entry);
                 indexed++;
-                _log($"  reconciled {Path.GetFileName(original)} → {n} chunks");
+                _onEvent(new WatchEvent(WatchEventKind.Reconciled, Path.GetFileName(original), n));
             }
             catch (Exception ex)
             {
-                _log($"  FAILED {Path.GetFileName(original)}: {ex.Message}");
+                _onEvent(new WatchEvent(WatchEventKind.Failed, Path.GetFileName(original), Detail: ex.Message));
             }
         }
 
@@ -180,11 +180,11 @@ public sealed class FolderWatcher
                 await _ingestor.RemoveFileAsync(key, cancellationToken).ConfigureAwait(false);
                 _manifest.Remove(key);
                 removed++;
-                _log($"  removed {key} (gone from disk)");
+                _onEvent(new WatchEvent(WatchEventKind.Removed, key));
             }
             catch (Exception ex)
             {
-                _log($"  FAILED remove {key}: {ex.Message}");
+                _onEvent(new WatchEvent(WatchEventKind.Failed, $"remove {key}", Detail: ex.Message));
             }
         }
 
@@ -194,7 +194,7 @@ public sealed class FolderWatcher
         }
 
         _manifestStore.Save(_manifest);
-        _log($"Reconcile complete: {indexed} indexed/updated, {removed} removed, {onDisk.Count} tracked.");
+        _onEvent(new WatchEvent(WatchEventKind.ReconcileComplete, Detail: $"{indexed} indexed/updated, {removed} removed, {onDisk.Count} tracked."));
     }
 
     /// <summary>Processes queued changes that have been quiet for the debounce window.</summary>
@@ -241,7 +241,7 @@ public sealed class FolderWatcher
                     {
                         await _ingestor.RemoveFileAsync(pending.OriginalPath, cancellationToken).ConfigureAwait(false);
                         _manifest.Remove(key);
-                        _log($"  deleted {Path.GetFileName(pending.OriginalPath)}");
+                        _onEvent(new WatchEvent(WatchEventKind.Deleted, Path.GetFileName(pending.OriginalPath)));
                         dirty = true;
                     }
                     else if (await TryIngestWithRetryAsync(pending.OriginalPath, indexedAt, cancellationToken).ConfigureAwait(false) is { } chunks)
@@ -251,13 +251,13 @@ public sealed class FolderWatcher
                             _manifest.Set(key, entry);
                         }
 
-                        _log($"  indexed {Path.GetFileName(pending.OriginalPath)} → {chunks} chunks");
+                        _onEvent(new WatchEvent(WatchEventKind.Indexed, Path.GetFileName(pending.OriginalPath), chunks));
                         dirty = true;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _log($"  FAILED {Path.GetFileName(pending.OriginalPath)}: {ex.Message}");
+                    _onEvent(new WatchEvent(WatchEventKind.Failed, Path.GetFileName(pending.OriginalPath), Detail: ex.Message));
                 }
             }
 

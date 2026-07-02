@@ -1,40 +1,51 @@
 using Rtfm.Core.Configuration;
 using Rtfm.Core.OpenSearch;
+using Spectre.Console;
 
 namespace Rtfm.Cli.Commands;
 
 /// <summary>
 /// <c>rtfm ping</c> — Phase 0 health check. Confirms the CLI can reach the
-/// local OpenSearch cluster and reports its status.
+/// local OpenSearch cluster and reports its status (Phase 7: as a color-coded
+/// panel with a spinner while probing).
 /// </summary>
 internal static class PingCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
         var endpoint = RtfmEnvironment.ResolveOpenSearchUrl();
-        Console.WriteLine($"Pinging OpenSearch at {endpoint} ...");
-
         var gateway = new OpenSearchGateway(endpoint);
-        var health = await gateway.PingAsync();
+
+        var health = await Ui.Err.Status()
+            .Spinner(Spinner.Known.Dots)
+            .StartAsync($"Pinging OpenSearch at {Ui.E(endpoint.ToString())} …", _ => gateway.PingAsync());
 
         if (!health.Reachable)
         {
-            Console.Error.WriteLine($"  UNREACHABLE: {health.Error}");
-            Console.Error.WriteLine("Is OpenSearch running? Try: docker compose up -d");
+            Ui.Err.Write(new Panel(
+                    new Markup($"[red]UNREACHABLE[/]  {Ui.E(health.Error)}\n[dim]Is OpenSearch running? Try:[/] docker compose up -d"))
+                .Header($"[bold] {Ui.E(endpoint.ToString())} [/]")
+                .BorderColor(Color.Red));
             return 1;
         }
 
-        Console.WriteLine($"  cluster:  {health.ClusterName}");
-        Console.WriteLine($"  status:   {health.Status}");
-        Console.WriteLine($"  nodes:    {health.NumberOfNodes}");
-
-        if (health.IsHealthy)
+        var statusColor = health.Status switch
         {
-            Console.WriteLine("OK — cluster is healthy.");
-            return 0;
-        }
+            "green" => Color.Green,
+            "yellow" => Color.Yellow,
+            _ => Color.Red,
+        };
 
-        Console.Error.WriteLine($"Cluster reachable but status is '{health.Status}'.");
-        return 1;
+        var report = new Grid().AddColumn().AddColumn();
+        report.AddRow(new Markup("[dim]cluster[/]"), new Text(health.ClusterName ?? "?"));
+        report.AddRow(new Markup("[dim]status[/]"), new Markup($"[bold {statusColor}]{Ui.E(health.Status ?? "?")}[/]"));
+        report.AddRow(new Markup("[dim]nodes[/]"), new Text(health.NumberOfNodes?.ToString() ?? "?"));
+        report.AddRow(new Markup("[dim]endpoint[/]"), new Text(endpoint.ToString()));
+
+        Ui.Out.Write(new Panel(report)
+            .Header(health.IsHealthy ? "[bold green] OpenSearch: healthy [/]" : $"[bold {statusColor}] OpenSearch: {Ui.E(health.Status ?? "?")} [/]")
+            .BorderColor(statusColor));
+
+        return health.IsHealthy ? 0 : 1;
     }
 }

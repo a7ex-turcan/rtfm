@@ -1,4 +1,6 @@
+using Rtfm.Cli;
 using Rtfm.Cli.Commands;
+using Spectre.Console;
 
 if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
 {
@@ -32,21 +34,36 @@ switch (args[0])
 
 static int PrintUsage()
 {
-    Console.WriteLine(
-        """
-        rtfm — Retrieval Tool For Manuals
+    Ui.Out.Write(new FigletText("RTFM").Color(Ui.Accent));
+    Ui.Out.MarkupLine("[bold]R[/]etrieval [bold]T[/]ool [bold]F[/]or [bold]M[/]anuals — [dim]the answer was in the docs all along.[/]");
+    Ui.Out.WriteLine();
 
-        Usage:
-          rtfm ping             Check connectivity to OpenSearch
-          rtfm convert <path>   Convert one document to markdown (stdout)
-          rtfm chunk <path>     Convert then show heading-aware chunks (stdout)
-          rtfm index <folder> [--project <name>]   (Re)index a folder (default project "default")
-          rtfm watch <folder> [--project <name>]   Watch a folder and keep the index fresh (Ctrl+C to stop)
-          rtfm search <query> [--project <name>]    Tier 1 search (omit --project to span all)
-          rtfm --help           Show this help
+    var commands = new Table()
+        .Border(TableBorder.Rounded)
+        .BorderColor(Color.Grey)
+        .Title("[bold]Commands[/]")
+        .AddColumn(new TableColumn("[bold]Command[/]").NoWrap())
+        .AddColumn("[bold]Description[/]");
 
-        Environment:
-          RTFM_OPENSEARCH_URL   OpenSearch endpoint (default http://localhost:9200)
-        """);
+    commands.AddRow($"[{Ui.Accent}]ping[/]", "Check connectivity to OpenSearch");
+    commands.AddRow($"[{Ui.Accent}]index[/] [dim]<folder> [[--project <name>]][/]", "(Re)index a folder (default project \"default\")");
+    commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder> [[--project <name>]][/]", "Watch a folder and keep the index fresh (Ctrl+C to stop)");
+    commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
+    commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");
+    commands.AddRow($"[{Ui.Accent}]chunk[/] [dim]<path>[/]", "Convert then show heading-aware chunks (stdout)");
+    Ui.Out.Write(commands);
+
+    var env = new Table()
+        .Border(TableBorder.Rounded)
+        .BorderColor(Color.Grey)
+        .Title("[bold]Environment[/]")
+        .AddColumn(new TableColumn("[bold]Variable[/]").NoWrap())
+        .AddColumn("[bold]Meaning[/]");
+
+    env.AddRow("[teal]RTFM_OPENSEARCH_URL[/]", "OpenSearch endpoint [dim](default http://localhost:9200)[/]");
+    env.AddRow("[teal]RTFM_PROJECT[/]", "Default project scope for the MCP server");
+    env.AddRow("[teal]RTFM_MODEL_DIR[/]", "Embedding model cache override [dim](default LocalApplicationData/rtfm/models)[/]");
+    Ui.Out.Write(env);
+
     return 0;
 }

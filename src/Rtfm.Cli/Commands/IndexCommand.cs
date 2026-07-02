@@ -1,6 +1,7 @@
 using Rtfm.Core.Indexing;
 using Rtfm.Core.Manifest;
 using Rtfm.Core.OpenSearch;
+using Spectre.Console;
 
 namespace Rtfm.Cli.Commands;
 
@@ -10,9 +11,13 @@ namespace Rtfm.Cli.Commands;
 /// <see cref="DocumentIngestor"/>; per-file failures are reported and skipped so
 /// one bad doc doesn't sink the run. Writes a manifest of what it indexed so
 /// <c>rtfm watch</c>'s startup reconcile (§2.8) starts from a correct baseline.
+/// Phase 7: renders a progress bar + summary table on a live terminal, plain
+/// lines when redirected.
 /// </summary>
 internal static class IndexCommand
 {
+    private sealed record FileResult(string Name, bool Ok, int Chunks, string? Error);
+
     public static async Task<int> RunAsync(string[] args)
     {
         var (folder, project) = CommandArgs.ParseFolderAndProject(args);
@@ -35,45 +40,101 @@ internal static class IndexCommand
             return 1;
         }
 
+        // Before the progress display starts: the embedder may log a one-time
+        // model download, which must not interleave with a live render.
         using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
         var indexer = new DocumentIndexer(new OpenSearchGateway());
         var ingestor = new DocumentIngestor(indexer, embedder);
 
         var created = await ingestor.EnsureIndexAsync().ConfigureAwait(false);
-        Console.Error.WriteLine(created
-            ? $"Created index '{RtfmIndex.Name}'."
-            : $"Index '{RtfmIndex.Name}' already exists.");
-        Console.Error.WriteLine($"Project: {project}");
+        Ui.Err.MarkupLine(created
+            ? $"Created index [bold]{RtfmIndex.Name}[/]."
+            : $"Index [bold]{RtfmIndex.Name}[/] already exists.");
 
         var manifestStore = ManifestStore.For(folder, project);
         var manifest = new DocumentManifest();
-
         var indexedAt = DateTimeOffset.UtcNow;
-        int docCount = 0, chunkCount = 0, failed = 0;
+        var results = new List<FileResult>();
 
-        foreach (var file in files)
+        async Task IndexAllAsync(Action<string>? onFile)
         {
-            try
+            foreach (var file in files)
             {
-                var n = await ingestor.IngestFileAsync(file, project, indexedAt).ConfigureAwait(false);
-                var info = new FileInfo(file);
-                manifest.Set(PathNormalizer.Normalize(file), new ManifestEntry(info.LastWriteTimeUtc.Ticks, info.Length));
-                docCount++;
-                chunkCount += n;
-                Console.Error.WriteLine($"  indexed {Path.GetFileName(file)} → {n} chunks");
+                var name = Path.GetFileName(file);
+                onFile?.Invoke(name);
+
+                try
+                {
+                    var n = await ingestor.IngestFileAsync(file, project, indexedAt).ConfigureAwait(false);
+                    var info = new FileInfo(file);
+                    manifest.Set(PathNormalizer.Normalize(file), new ManifestEntry(info.LastWriteTimeUtc.Ticks, info.Length));
+                    results.Add(new FileResult(name, Ok: true, n, Error: null));
+                }
+                catch (Exception ex)
+                {
+                    results.Add(new FileResult(name, Ok: false, 0, ex.Message));
+                }
             }
-            catch (Exception ex)
+        }
+
+        if (Ui.Fancy)
+        {
+            await Ui.Err.Progress()
+                .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(), new SpinnerColumn(Spinner.Known.Dots))
+                .StartAsync(async ctx =>
+                {
+                    var task = ctx.AddTask($"[bold]Indexing[/] [dim]{Ui.E(folder)}[/]", maxValue: files.Count);
+                    await IndexAllAsync(name =>
+                    {
+                        task.Description = $"[bold]Indexing[/] [dim]{Ui.E(name)}[/]";
+                        task.Increment(results.Count == 0 ? 0 : 1);
+                    }).ConfigureAwait(false);
+                    task.Value = task.MaxValue;
+                }).ConfigureAwait(false);
+        }
+        else
+        {
+            await IndexAllAsync(null).ConfigureAwait(false);
+            foreach (var r in results)
             {
-                failed++;
-                Console.Error.WriteLine($"  FAILED {Path.GetFileName(file)}: {ex.Message}");
+                Console.Error.WriteLine(r.Ok
+                    ? $"  indexed {r.Name} → {r.Chunks} chunks"
+                    : $"  FAILED {r.Name}: {r.Error}");
             }
         }
 
         await ingestor.RefreshAsync().ConfigureAwait(false);
         manifestStore.Save(manifest);
 
-        Console.Error.WriteLine($"Done: {docCount} docs, {chunkCount} chunks indexed into '{RtfmIndex.Name}' (project '{project}')"
-            + (failed > 0 ? $", {failed} failed." : "."));
-        return failed > 0 && docCount == 0 ? 1 : 0;
+        RenderSummary(results, project, embedder is not null);
+        return results.Any(r => !r.Ok) && results.All(r => !r.Ok) ? 1 : 0;
+    }
+
+    private static void RenderSummary(List<FileResult> results, string project, bool embedded)
+    {
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .AddColumn(" ")
+            .AddColumn("[bold]Document[/]")
+            .AddColumn(new TableColumn("[bold]Chunks[/]").RightAligned());
+
+        foreach (var r in results)
+        {
+            table.AddRow(
+                r.Ok ? new Markup("[green]✓[/]") : new Markup("[red]✗[/]"),
+                r.Ok ? new Text(r.Name) : new Text($"{r.Name} — {r.Error}", new Style(Color.Red)),
+                new Text(r.Ok ? r.Chunks.ToString() : "—"));
+        }
+
+        Ui.Err.Write(table);
+
+        var ok = results.Count(r => r.Ok);
+        var failed = results.Count - ok;
+        var chunks = results.Sum(r => r.Chunks);
+        var summary = $"[bold]{ok}[/] docs · [bold]{chunks}[/] chunks → [bold]{RtfmIndex.Name}[/] · project [{Ui.Accent}]{Ui.E(project)}[/]"
+            + (embedded ? " · [dim]embedded[/]" : " · [yellow]lexical-only[/]")
+            + (failed > 0 ? $" · [red]{failed} failed[/]" : string.Empty);
+        Ui.Err.MarkupLine(summary);
     }
 }

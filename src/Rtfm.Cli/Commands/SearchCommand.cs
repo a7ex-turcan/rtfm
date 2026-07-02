@@ -1,12 +1,14 @@
 using Rtfm.Core.OpenSearch;
 using Rtfm.Core.Search;
+using Spectre.Console;
 
 namespace Rtfm.Cli.Commands;
 
 /// <summary>
 /// <c>rtfm search &lt;query&gt;</c> — dev aid to verify indexing/retrieval from
 /// the CLI (Tier 2 hybrid when the model is available, else Tier 1 BM25).
-/// The MCP server exposes the same search.
+/// The MCP server exposes the same search. Phase 7: hits render as ranked
+/// cards (score bar, breadcrumb, source) on stdout.
 /// </summary>
 internal static class SearchCommand
 {
@@ -25,19 +27,29 @@ internal static class SearchCommand
         {
             using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
             var search = new DocumentSearch(new OpenSearchGateway(), embedder, Console.Error.WriteLine);
-            var hits = await search.SearchAsync(query, topK: 5, project: project).ConfigureAwait(false);
+
+            var hits = await Ui.Err.Status()
+                .Spinner(Spinner.Known.Dots)
+                .StartAsync("Searching…", _ => search.SearchAsync(query, topK: 5, project: project));
 
             var scope = string.IsNullOrEmpty(project) ? "all projects" : $"project '{project}'";
-            Console.Error.WriteLine($"# {hits.Count} hits for \"{query}\" ({scope})");
+            Ui.Err.MarkupLine($"[bold]{hits.Count}[/] hits for [italic]\"{Ui.E(query)}\"[/] [dim]({Ui.E(scope)})[/]"
+                + (embedder is null ? " [yellow](lexical-only)[/]" : string.Empty));
+
+            var rank = 0;
             foreach (var hit in hits)
             {
+                rank++;
                 var modified = hit.SourceModifiedAt?.ToString("yyyy-MM-dd") ?? "unknown";
-                Console.Out.WriteLine($"── score={hit.Score:F2}  project={hit.Project}  modified={modified}");
-                Console.Out.WriteLine($"   {hit.HeadingPath}");
-                Console.Out.WriteLine($"   {Path.GetFileName(hit.SourcePath)}");
                 var snippet = hit.Content.Length > 240 ? hit.Content[..240] + "…" : hit.Content;
-                Console.Out.WriteLine($"   {snippet.ReplaceLineEndings(" ")}");
-                Console.Out.WriteLine();
+
+                Ui.Out.Write(new Rule($"[bold]#{rank}[/]  {ScoreBar(hit.Score)} [dim]{hit.Score:F2}[/]")
+                    .RuleStyle(new Style(Color.Grey))
+                    .LeftJustified());
+                Ui.Out.MarkupLine($"[bold {Ui.Accent}]{Ui.E(hit.HeadingPath)}[/]");
+                Ui.Out.MarkupLine($"[dim]{Ui.E(Path.GetFileName(hit.SourcePath))} · {Ui.E(hit.Project)} · modified {Ui.E(modified)}[/]");
+                Ui.Out.WriteLine(snippet.ReplaceLineEndings(" "));
+                Ui.Out.WriteLine();
             }
 
             return 0;
@@ -47,6 +59,13 @@ internal static class SearchCommand
             Console.Error.WriteLine($"rtfm search: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>A 10-cell bar for a hybrid score in [0,1]; BM25 fallback scores clamp at full.</summary>
+    private static string ScoreBar(double score)
+    {
+        var filled = (int)Math.Clamp(Math.Round(score * 10), 0, 10);
+        return $"[{Ui.Accent}]{new string('█', filled)}[/][grey]{new string('░', 10 - filled)}[/]";
     }
 
     /// <summary>Splits query words from flags. Project defaults to null (all projects); --project scopes it.</summary>

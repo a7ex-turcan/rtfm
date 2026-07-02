@@ -254,8 +254,8 @@ One tool to start:
   arg overrides per call (a specific project, or all).
 
 Later additions are now scheduled rather than hypothetical: `get_document` /
-`list_sources` / `find_similar` are **Phase 7**; `list_contradictions` is
-Phase 11; correction tools are Phase 12. Don't build any of them ahead of their
+`list_sources` / `find_similar` are **Phase 8**; `list_contradictions` is
+Phase 12; correction tools are Phase 13. Don't build any of them ahead of their
 phase.
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
@@ -369,6 +369,7 @@ project" reuses delete-by-query (§2.9).
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
 | Embeddings (Tier 2) | `Microsoft.ML.OnnxRuntime` + `Microsoft.ML.Tokenizers`, all-MiniLM-L6-v2 (384-dim, auto-downloaded + cached) |
 | File watching | `System.IO.FileSystemWatcher` |
+| CLI presentation (`Rtfm.Cli` only — never `Rtfm.Mcp`) | `Spectre.Console` |
 
 > Pin exact package versions at build time — verify latest stable against NuGet
 > when scaffolding.
@@ -378,8 +379,8 @@ project" reuses delete-by-query (§2.9).
 > `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b),
 > `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
 > **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +
-> `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). Bump deliberately, not
-> automatically.
+> `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). `Spectre.Console` **0.57.1**
+> (Phase 7). Bump deliberately, not automatically.
 
 ---
 
@@ -580,7 +581,29 @@ Phases 0–6 delivered the original scope: the tool answers both question types
 end-to-end. The phases below extend it — same rules: independently verifiable,
 one phase at a time, resist pulling work forward.
 
-### Phase 7 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar`
+### Phase 7 — Pleasant CLI (Spectre.Console)
+The CLI is a human tool (index/watch/status are dev-operated even though
+retrieval UX belongs to the LLM client, §2.11) — make it feel like one.
+**Spectre.Console** (pinned at build time) in `Rtfm.Cli` **only** — `Rtfm.Mcp`
+stays plain forever (§2.2: stdout is sacred; no UI library goes anywhere near
+it).
+- `rtfm` — figlet banner + command/env tables instead of the plain usage dump.
+- `rtfm ping` — spinner while probing; color-coded cluster status panel.
+- `rtfm index` — progress bar over files, ✓/✗ per doc, summary panel.
+- `rtfm search` — ranked result cards: score bar, colored breadcrumb, dimmed
+  source/date, snippet.
+- `rtfm watch` — the showpiece: a live dashboard (folder, project, uptime,
+  event counters, scrolling event feed) while watching.
+- **Degradation rule:** when stdout/stderr is redirected (non-interactive),
+  output stays plain, parseable text — existing stream conventions (results on
+  stdout, diagnostics on stderr) and exit codes unchanged. `FolderWatcher`'s
+  log callback becomes a small structured event (kind/path/count) whose
+  `ToString()` is today's exact line format, so scripts keep parsing.
+**Done when:** each command renders the rich UI in an interactive terminal; the
+watch smoke scripts still pass unmodified against redirected output; `dotnet
+test` green; MCP raw-stdio check still shows pure JSON-RPC.
+
+### Phase 8 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar`
 The §2.11 "possible later additions", promoted: using the tool in anger shows
 the agent often needs more than a 1600-char chunk.
 - `get_document(path, project?)` — the full converted markdown of one document,
@@ -600,7 +623,7 @@ ingest changes.
 completed via `get_document`; `list_sources` returns the full corpus with
 correct metadata; `find_similar` on the RBAC doc surfaces the ABAC doc.
 
-### Phase 8 — Format expansion: PDF, Excel, CSV
+### Phase 9 — Format expansion: PDF, Excel, CSV
 Widen §2.5's converter fan-in; the shared tail (strip → markdown → chunk) stays
 untouched, so each format is only a new front end + detection rule.
 - **PDF** — candidate: `UglyToad.PdfPig` (pure managed, MIT). Detect by `%PDF`
@@ -621,7 +644,7 @@ Pin exact package versions at build time, per §3.
 index and answer a lookup question about their own content; existing formats
 unregressed.
 
-### Phase 9 — Observability: `rtfm status` + staleness
+### Phase 10 — Observability: `rtfm status` + staleness
 The index is a black box unless you curl OpenSearch. One read-only command:
 - `rtfm status` — per project: doc/chunk counts, newest/oldest
   `source_modified_at`, last `indexed_at`, vector coverage (% chunks embedded);
@@ -635,7 +658,7 @@ The index is a black box unless you curl OpenSearch. One read-only command:
 **Done when:** `rtfm status` reports accurate counts/dates against the live
 index, and `--stale` flags a deliberately-backdated doc.
 
-### Phase 10 — Tier 3 retrieval: cross-encoder reranking
+### Phase 11 — Tier 3 retrieval: cross-encoder reranking
 The next precision lever after hybrid (§2.10): retrieve generously (the hybrid
 k is already 25+), then rerank the candidates with a small local cross-encoder
 (candidate: ms-marco-MiniLM family via ONNX — same runtime, tokenizer, and
@@ -645,7 +668,7 @@ Same degradation rule as Tier 2: no model → skip reranking, loudly.
 **Done when:** a query set over the real corpus shows reranked top-3 ≥ hybrid
 top-3 (spot-check, not benchmark), with no query slower than ~1s end-to-end.
 
-### Phase 11 — Proactive contradiction detection (§2.13's Tier-2 add-on, now unblocked)
+### Phase 12 — Proactive contradiction detection (§2.13's Tier-2 add-on, now unblocked)
 The identity feature: docs rot and disagree, and nobody notices until it burns
 someone. At ingest, compare each new chunk's vector against *similar* chunks
 from **other documents in the same project** (cross-project differences are
@@ -663,7 +686,7 @@ side's doc is re-ingested and re-evaluate).
 `admin` vs `super-admin` example) yields exactly that pair in
 `rtfm contradictions`, and the MCP tool returns it with both dates.
 
-### Phase 12 — Corrections that survive re-index (§2.13 C, decision + build)
+### Phase 13 — Corrections that survive re-index (§2.13 C, decision + build)
 When an agent + user confirm "the docs are wrong / outdated here", persist that
 knowledge. Leading option per §2.13 C: a separate **overrides index** (option 2)
 — keeps `rtfm-docs` purely derived (§2.9 delete-by-query stays safe), merged at
@@ -676,19 +699,19 @@ before any code.**
 `search_docs` results, survives a full re-index of the corpus, and is visibly
 attributed as an override (never silently masquerading as source text).
 
-### Phase 13 — Packaging & distribution
+### Phase 14 — Packaging & distribution
 Adoption currently requires cloning the repo and building. Ship `rtfm` +
 `rtfm-mcp` as proper artifacts: `dotnet tool install -g` (or single-file
 published exes), with `.mcp.json` guidance updated to match (§6's "published
 single-file exe is the cleaner long-term answer"). Include the §2.12 setup
 notes (`vm.max_map_count` on native Linux) in the install story. Can be pulled
-earlier if a second user shows up before Phases 7–12 land.
+earlier if a second user shows up before Phases 8–13 land.
 **Done when:** a machine without the repo can install both tools, run
 `docker compose up -d` + `rtfm index`, and wire the MCP server into Claude Code
 from the published artifact alone.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
-manual exports remain the ingestion contract for now — Phase 9's staleness
+manual exports remain the ingestion contract for now — Phase 10's staleness
 surfacing is the mitigation), web UI (the LLM client is the UX, §2.11), cloud
 sync/hosting (per-dev local is the model, §intro).
 
