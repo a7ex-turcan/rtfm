@@ -98,6 +98,60 @@ Build in Release first (the config points at the built DLL, not `dotnet run`),
 then use `/mcp` in Claude Code to confirm `rtfm` connected and see its tools.
 Editing `.mcp.json` needs a Claude Code restart to take effect.
 
+### Using RTFM from your other repos
+
+RTFM is designed to serve **many codebases at once**: OpenSearch and its index
+are shared, each Claude Code instance spawns its own `rtfm-mcp` process, and the
+per-chunk `project` field keeps corpora from blurring together.
+
+One-time, per machine:
+
+```bash
+# 1. Point RTFM_HOME at your rtfm clone (set it as a persistent user env var)
+#    PowerShell:  [Environment]::SetEnvironmentVariable('RTFM_HOME', 'D:\Projects\rtfm', 'User')
+#    bash/zsh:    export RTFM_HOME=~/src/rtfm   (in your shell profile)
+
+# 2. Index each project's docs under its own project name
+rtfm index D:\docs\payments --project payments
+rtfm index D:\docs\pam      --project pam
+```
+
+Then drop this `.mcp.json` into each consuming repo — it is the same template
+everywhere; only `RTFM_PROJECT` changes:
+
+```json
+{
+  "mcpServers": {
+    "rtfm": {
+      "command": "dotnet",
+      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/Rtfm.Mcp.dll"],
+      "env": {
+        "RTFM_OPENSEARCH_URL": "http://localhost:9200",
+        "RTFM_PROJECT": "payments"
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- Claude Code expands `${RTFM_HOME:-.}` at launch; the `.-` fallback makes the
+  same file work inside the rtfm repo itself (where the path is relative to the
+  repo root). Committing this file is safe — each dev supplies their own
+  `RTFM_HOME`.
+- Claude Code prompts for approval the first time each repo uses the server —
+  expected, not a bug.
+- Sessions auto-scope to their repo's `RTFM_PROJECT`; the agent can still pass
+  `project="*"` to compare across projects, and every hit carries its `project`
+  for attribution.
+- Alternatively, `claude mcp add --scope user rtfm …` registers the server once
+  for your user across all repos — but then there's no per-repo scoping; you
+  trade the committed template for "all projects unless the agent filters".
+- Each running instance loads its own embedding model (~100–200 MB RAM) on
+  first search, and holds a lock on the built DLL — disconnect instances (or
+  restart Claude Code) before rebuilding rtfm.
+
 ## Documentation
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, locked design decisions, tech stack,

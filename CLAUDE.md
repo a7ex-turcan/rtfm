@@ -750,14 +750,25 @@ committed to the repo and every dev gets it automatically on clone. Create
   "mcpServers": {
     "rtfm": {
       "command": "dotnet",
-      "args": ["src/Rtfm.Mcp/bin/Release/net10.0/Rtfm.Mcp.dll"],
+      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/Rtfm.Mcp.dll"],
       "env": {
-        "RTFM_OPENSEARCH_URL": "http://localhost:9200"
+        "RTFM_OPENSEARCH_URL": "http://localhost:9200",
+        "RTFM_PROJECT": "pam"
       }
     }
   }
 }
 ```
+
+**This same template serves every consuming repo** (the multi-repo workflow —
+see the README's "Using RTFM from your other repos"): Claude Code expands
+`${RTFM_HOME:-.}` at launch, so inside the rtfm repo the fallback `.` keeps the
+path relative to the repo root, while other repos resolve it via the per-dev
+`RTFM_HOME` env var pointing at the rtfm clone. Only `RTFM_PROJECT` differs per
+repo (§2.14 auto-scoping). Each Claude Code instance spawns its own `rtfm-mcp`
+process against the shared OpenSearch — stateless readers, no coordination
+needed; each loads its own embedding model (~100–200 MB) on first search.
+Phase 14 (packaging) collapses the template to a bare `rtfm-mcp` command.
 
 Notes on this:
 - **Build first.** Point at the built DLL, **not** `dotnet run` — `dotnet run`
