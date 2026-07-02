@@ -373,8 +373,9 @@ project" reuses delete-by-query (§2.9).
 >
 > **Pinned so far:** `OpenSearch.Net` **1.8.0**; OpenSearch Docker image
 > **2.17.1** (Phase 0). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
-> `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b).
-> Bump deliberately, not automatically.
+> `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b),
+> `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
+> **10.0.9** (Phase 4). Bump deliberately, not automatically.
 
 ---
 
@@ -481,7 +482,7 @@ chunks / 5 docs, re-index stays 111, technical + conceptual queries return
 sensible hits carrying `source_modified_at` and `project`; project filter scopes
 correctly (pam → hits, other → 0, no flag → all).
 
-### Phase 4 — MCP server (Tier 1 retrieval)
+### Phase 4 — MCP server (Tier 1 retrieval) ✅ **Done**
 stdio server exposing `search_docs(query, top_k, project?)`. Tier 1 BM25 query
 across keyword + text. Returns chunks with breadcrumb + source +
 `source_modified_at` + `project`, scoped by `RTFM_PROJECT` (optional per-call
@@ -492,6 +493,17 @@ project (§2.13 B, §2.14). Wire into Claude Code via project-scoped `.mcp.json`
 **Done when:** from inside Claude Code, asking "what's the endpoint to GET X"
 retrieves the right passage via the tool; and when two docs disagree, the newer
 is preferred and the conflict is surfaced to the user.
+
+*Delivered:* `Rtfm.Mcp` host (stdio transport, `WithToolsFromAssembly`, logging
+pinned to stderr per §2.2) and `SearchDocsTool` (`DocumentSearch` injected via
+DI). The tool `[Description]` carries the recency/contradiction + cross-project
+guidance. `RtfmEnvironment.ResolveProjectScope` handles the `RTFM_PROJECT`
+default / per-call override / `*`/`all`. `.mcp.json` registers the `rtfm`
+server. Verified over raw stdio JSON-RPC (initialize / tools-list / tools-call):
+advertises `search_docs`, `RTFM_PROJECT=pam` scopes results, each hit carries
+`project` + `source_modified_at`, and **stdout stays pure JSON-RPC** (logs only
+on stderr). Confirming *inside Claude Code* needs a restart to load `.mcp.json`
+(approval prompt expected; use `/mcp`) — an interactive step (§6).
 
 ### Phase 5 — Watch mode
 `rtfm watch ./docs` — FileSystemWatcher with debounce, lock retry, delete/rename

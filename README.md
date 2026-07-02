@@ -91,8 +91,14 @@ docker compose --profile debug up -d      # → http://localhost:5601
 
 The MCP server is registered as a project-scoped server via the committed
 [`.mcp.json`](./.mcp.json) at the repo root, so every developer gets it on clone.
+It exposes one tool, `search_docs(query, top_k, project?)`, returning ranked
+passages with their project, source, heading breadcrumb, last-modified date, and
+text. Scope is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or pass
+`project="*"` to search across all projects).
+
 Build in Release first (the config points at the built DLL, not `dotnet run`),
 then use `/mcp` in Claude Code to confirm `rtfm` connected and see its tools.
+Editing `.mcp.json` needs a Claude Code restart to take effect.
 
 ## Documentation
 
