@@ -425,13 +425,25 @@ title, and `source_modified_at` (§2.13 A); `indexed_at` is stamped at index tim
 (Phase 3). Validated on the real RBAC export: 25 chunks, correct nested
 breadcrumbs, all within the size target.
 
-### Phase 3 — Indexing (batch)
+### Phase 3 — Indexing (batch) ✅ **Done**
 OpenSearch index mapping: `keyword` + analyzed `text` + custom analyzer
 (preserve `/`, `_`, camelCase) + `date` fields (`source_modified_at`,
 `indexed_at`; §2.13) + a `knn_vector` field defined but unused.
 Bulk upsert. `rtfm index ./docs`.
 **Done when:** `rtfm index ./docs` populates `rtfm-docs` and a manual query
 returns sensible hits for a known term.
+
+*Delivered:* `RtfmIndex` (mapping/settings as raw JSON; `rtfm_technical`
+analyzer = whitespace + `word_delimiter_graph` with `preserve_original`, so
+`BUSINESS_LINE__C` / `/Bundle` / camelCase stay searchable), `PathNormalizer`
+(§2.12 key), timestamp extraction (§2.13 A: MHTML `Date` header → docx
+`docProps/core.xml` → mtime fallback), `OpenSearchGateway` index/search ops
+(raw JSON, low-level client), `DocumentIndexer` (per-doc delete-by-query + bulk
+upsert, deterministic `_id` = `path#ordinal` → idempotent re-index), and
+`DocumentSearch` (Tier 1 BM25 `multi_match`). CLI: `rtfm index <folder>`,
+`rtfm search <query>`. Verified on the real corpus: 111 chunks / 5 docs, re-index
+stays 111, technical + conceptual queries return sensible hits carrying
+`source_modified_at`.
 
 ### Phase 4 — MCP server (Tier 1 retrieval)
 stdio server exposing `search_docs(query, top_k)`. Tier 1 BM25 query across
