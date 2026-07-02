@@ -409,11 +409,21 @@ attribute-clean raw HTML (GitHub pipe tables can't hold block content) — the
 text is still retrievable. Fixture tests are synthetic; the real corpus is
 gitignored.
 
-### Phase 2 — Chunking
+### Phase 2 — Chunking ✅ **Done**
 Heading-aware splitter, breadcrumb prefixing, overlap, metadata
 (source path + heading path).
 **Done when:** a converted doc yields chunks that each carry a correct
 breadcrumb and source path, with sane sizes and overlap.
+
+*Delivered:* `MarkdownChunker` (+ `Chunk`/`ChunkMetadata`/`ChunkingOptions`) in
+`Rtfm.Core/Chunking`, and the `rtfm chunk <path>` dev command. Splits on heading
+boundaries into breadcrumb-tagged chunks; drops pure container headings (kept in
+descendants' breadcrumbs); overlaps paragraph windows when a section exceeds the
+size target; **splits oversized tables by rows, repeating the header** so each
+piece is self-describing; respects code fences. Chunk carries source path,
+title, and `source_modified_at` (§2.13 A); `indexed_at` is stamped at index time
+(Phase 3). Validated on the real RBAC export: 25 chunks, correct nested
+breadcrumbs, all within the size target.
 
 ### Phase 3 — Indexing (batch)
 OpenSearch index mapping: `keyword` + analyzed `text` + custom analyzer
