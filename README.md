@@ -106,7 +106,7 @@ dotnet build Rtfm.slnx -c Release
 with Docker Desktop's autostart):
 
 ```powershell
-docker compose up -d
+docker compose up -d      # or, once step 4 is done: `rtfm init` from anywhere
 ```
 
 **4. Put `rtfm` and `rtfm-mcp` on your PATH and set `RTFM_HOME`** (persistent,
@@ -166,7 +166,7 @@ dotnet build Rtfm.slnx -c Release
 only *native Linux* hosts need to do that by hand):
 
 ```bash
-docker compose up -d
+docker compose up -d      # or, once step 4 is done: `rtfm init` from anywhere
 ```
 
 **4. Put `rtfm` and `rtfm-mcp` on your PATH and set `RTFM_HOME`** — append to
@@ -208,6 +208,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 
 | Command | Arguments | What it does |
 |---|---|---|
+| `rtfm init` | `[--with-model]` | One-shot bootstrap: starts the OpenSearch container (`docker compose up -d --wait`), verifies connectivity, creates the index + search pipeline. `--with-model` also pre-downloads the embedding model. Works from any directory — the compose file resolves from the current dir, then `RTFM_HOME`, then a copy embedded in the tool itself. Idempotent. |
 | `rtfm ping` | — | Health-checks the OpenSearch cluster; color-coded status panel. |
 | `rtfm index` | `<folder> [--project <name>]` | One-shot (re)index of every supported document under `<folder>` — convert → chunk → embed → bulk upsert. Idempotent: re-running replaces each doc's chunks in place. Writes the watch manifest so `watch` starts from a correct baseline. Default project: `default`. |
 | `rtfm watch` | `<folder> [--project <name>]` | Long-running incremental indexer. On start it *reconciles*: anything added/changed/deleted while the watcher was off is caught up. Then edits, adds, renames, and deletes are reflected in the index within seconds (debounced, editor-lock tolerant). Live dashboard on a terminal; plain log lines when redirected. `Ctrl+C` to stop. |

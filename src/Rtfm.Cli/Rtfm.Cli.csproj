@@ -8,6 +8,13 @@
     <PackageReference Include="Spectre.Console" Version="0.57.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- `rtfm init` carries the compose file so it works away from the repo
+         (and, post-packaging, without one). Linked from the repo root: one
+         source of truth, no drift. -->
+    <EmbeddedResource Include="..\..\docker-compose.yml" Link="docker-compose.yml" LogicalName="rtfm.docker-compose.yml" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>

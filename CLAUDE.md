@@ -94,7 +94,13 @@ client spawns the server as a child process locally. No ports, no auth, no CORS.
 ### 2.3 Store: local single-node OpenSearch in Docker
 One container, one persistent volume, security plugin disabled for local use.
 No cluster, no auth headaches. Shipped via `docker-compose.yml` so a dev runs
-`docker compose up -d` once.
+`docker compose up -d` once — or `rtfm init [--with-model]`, which runs compose
+(`up -d --wait` against the healthcheck), verifies connectivity, and creates
+the index + hybrid pipeline in one shot. The compose file is also *embedded* in
+`Rtfm.Cli` (linked from the repo root — one source of truth) and materialized
+under `LocalApplicationData/rtfm/` when init runs outside the repo; resolution
+order is cwd → `RTFM_HOME` → embedded copy. That embedded copy is what lets a
+packaged, repo-less `rtfm` (Phase 14) still bootstrap a machine.
 - **Non-goal:** .NET Aspire orchestration. It's a single container per dev;
   Aspire is overkill here and adds a dependency. Plain compose.
 - **Optional debug UI:** OpenSearch Dashboards is wired into `docker-compose.yml`

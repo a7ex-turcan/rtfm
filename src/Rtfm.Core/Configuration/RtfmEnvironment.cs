@@ -18,6 +18,16 @@ public static class RtfmEnvironment
     /// <summary>Environment variable overriding where embedding model files are cached (Tier 2, §2.10).</summary>
     public const string ModelDirectoryVariable = "RTFM_MODEL_DIR";
 
+    /// <summary>Environment variable pointing at the rtfm clone (multi-repo `.mcp.json` resolution, README).</summary>
+    public const string RtfmHomeVariable = "RTFM_HOME";
+
+    /// <summary>The rtfm clone directory when <c>RTFM_HOME</c> is set and exists, else null.</summary>
+    public static string? ResolveRtfmHome()
+    {
+        var value = Environment.GetEnvironmentVariable(RtfmHomeVariable);
+        return !string.IsNullOrWhiteSpace(value) && Directory.Exists(value.Trim()) ? value.Trim() : null;
+    }
+
     /// <summary>
     /// Returns the configured OpenSearch endpoint, falling back to the local default.
     /// </summary>

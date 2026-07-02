@@ -9,6 +9,9 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
 
 switch (args[0])
 {
+    case "init":
+        return await InitCommand.RunAsync(args[1..]);
+
     case "ping":
         return await PingCommand.RunAsync(args[1..]);
 
@@ -88,6 +91,7 @@ static int PrintUsage()
         .AddColumn(new TableColumn("[bold]Command[/]").NoWrap())
         .AddColumn("[bold]Description[/]");
 
+    commands.AddRow($"[{Ui.Accent}]init[/] [dim][[--with-model]][/]", "Bootstrap: start OpenSearch (docker), create index + pipeline");
     commands.AddRow($"[{Ui.Accent}]ping[/]", "Check connectivity to OpenSearch");
     commands.AddRow($"[{Ui.Accent}]index[/] [dim]<folder> [[--project <name>]][/]", "(Re)index a folder (default project \"default\")");
     commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder> [[--project <name>]][/]", "Watch a folder and keep the index fresh (Ctrl+C to stop)");
