@@ -581,7 +581,7 @@ Phases 0–6 delivered the original scope: the tool answers both question types
 end-to-end. The phases below extend it — same rules: independently verifiable,
 one phase at a time, resist pulling work forward.
 
-### Phase 7 — Pleasant CLI (Spectre.Console)
+### Phase 7 — Pleasant CLI (Spectre.Console) ✅ **Done**
 The CLI is a human tool (index/watch/status are dev-operated even though
 retrieval UX belongs to the LLM client, §2.11) — make it feel like one.
 **Spectre.Console** (pinned at build time) in `Rtfm.Cli` **only** — `Rtfm.Mcp`
@@ -602,6 +602,21 @@ it).
 **Done when:** each command renders the rich UI in an interactive terminal; the
 watch smoke scripts still pass unmodified against redirected output; `dotnet
 test` green; MCP raw-stdio check still shows pure JSON-RPC.
+
+*Delivered:* `Spectre.Console` 0.57.1 in `Rtfm.Cli` only. `Ui` holds two
+consoles honoring the stream conventions — `Ui.Out` (stdout: results, help,
+ping report) and `Ui.Err` (stderr: index progress/summary, watch dashboard) —
+with `Ui.Fancy` gating live rendering and all dynamic text markup-escaped.
+Banner + command/env tables; ping spinner + color-coded panel; index progress
+bar (embedder warms up *before* the live render so download logs don't
+interleave) + ✓/✗ summary table; search result cards with 10-cell score bars;
+watch live dashboard (status dot, uptime ticker, indexed/removed/failed
+counters, last-12 event feed) via `Live` on stderr. `FolderWatcher`'s callback
+became `Action<WatchEvent>` (kind/path/chunks/detail); `WatchEvent.ToString()`
+reproduces the pre-Phase-7 lines byte-for-byte and unit tests pin that
+contract, so the redirected fallback (and the smoke scripts parsing it) is
+unchanged. Verified: 51/51 tests, watch smoke script green unmodified, MCP raw
+stdio still pure JSON-RPC, index/search/ping exercised against the live stack.
 
 ### Phase 8 — MCP tool surface v2: `get_document`, `list_sources`, `find_similar`
 The §2.11 "possible later additions", promoted: using the tool in anger shows
