@@ -178,8 +178,8 @@ search tech. Rules:
   regardless of whether the chunk was found by keyword or by vector, and it's
   cheap leverage that helps *both* question types.
 - Add modest overlap so answers spanning a boundary aren't lost.
-- Store metadata on every chunk: **source file path** (see §2.9) and
-  **heading path**.
+- Store metadata on every chunk: **source file path** (see §2.9), **heading
+  path**, and **timestamps** (`source_modified_at`, `indexed_at`; see §2.13).
 
 ### 2.8 Watch mode: FileSystemWatcher, handled correctly
 `System.IO.FileSystemWatcher` is the mechanism, but the naive version
@@ -241,7 +241,8 @@ one without the embedding weight:
 ### 2.11 MCP tool surface (MVP)
 One tool to start:
 - `search_docs(query: string, top_k: int = 5)` → ranked chunks, each with its
-  heading breadcrumb, source file, and text.
+  heading breadcrumb, source file, text, and `source_modified_at` (for recency /
+  contradiction reasoning — see §2.13).
 
 Possible later additions (don't build yet): `get_document(path)` to fetch a full
 page, `list_sources()` to enumerate indexed docs.
@@ -273,6 +274,46 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 - **`.mcp.json` uses `dotnet <dll>`, not a native exe** — this is the portable
   choice and runs anywhere `dotnet` is on PATH (§6). Forward slashes in the args
   path are fine; the CLR normalizes them. Don't swap it for a per-OS binary.
+
+### 2.13 Knowledge recency & contradiction awareness
+Docs evolve and disagree over time (an older page says `user-role = admin`, a
+newer one says `super-admin`). RTFM should let the LLM reason about *which
+knowledge is newer* and surface conflicts rather than silently averaging them.
+Shipped in layers — **A + B are committed; C is deferred**.
+
+- **(A) Timestamp every chunk.** Two `date` fields on each chunk:
+  - `source_modified_at` — the document's own recency (the truth signal).
+  - `indexed_at` — when RTFM ingested it (tie-breaker / audit).
+  Source of the modified date, in priority order: embedded doc modified-date
+  (docx core props `dcterms:modified`; Confluence "last modified" byline when
+  present) → the MHTML `Date:` header → file mtime. These fields go into the
+  mapping from the start (Phase 3) so enabling recency logic never needs a
+  reindex.
+
+- **(B) Recency-aware retrieval + conflict flagging (Phase 4).** `search_docs`
+  returns each chunk's `source_modified_at` alongside source + breadcrumb, and
+  the tool instructs the agent to treat the **newer** source as *likely*
+  authoritative **and to flag contradictions to the user** rather than pick
+  silently. Deliberately do **not** recency-boost-and-hide the older chunk —
+  both must be retrieved for the conflict to be visible. "Newer = truth" is a
+  strong heuristic, not a law (a new doc may be a scoped draft), so B *flags*,
+  it does not overwrite.
+
+- **(C) Agent-driven correction / supersession — deferred, needs a decision.**
+  Letting the agent write user-confirmed truth back (`supersede` / `annotate`
+  MCP tools, human-in-the-loop) collides with the derived-index model: a direct
+  edit to OpenSearch is clobbered on the next re-index (§2.9 delete-by-query +
+  reindex). Corrections must live somewhere that survives reindex. Options to
+  decide when we build it: (1) write back to the **source document** (cleanest
+  truth model, awkward to edit MHTML/docx in place); (2) a separate
+  **overrides/annotations index** merged at query time (keeps the main index
+  derived; more machinery); (3) edit the chunk in place — simple but wiped on
+  re-index, a trap. Not built yet.
+
+- **Proactive contradiction detection is a Tier-2 add-on.** Comparing a newly
+  ingested chunk against *similar* existing chunks from other documents needs
+  semantic similarity, so it waits for Tier-2 embeddings (§2.10). Query-time LLM
+  reasoning (B) comes first.
 
 ---
 
@@ -376,17 +417,20 @@ breadcrumb and source path, with sane sizes and overlap.
 
 ### Phase 3 — Indexing (batch)
 OpenSearch index mapping: `keyword` + analyzed `text` + custom analyzer
-(preserve `/`, `_`, camelCase) + a `knn_vector` field defined but unused.
+(preserve `/`, `_`, camelCase) + `date` fields (`source_modified_at`,
+`indexed_at`; §2.13) + a `knn_vector` field defined but unused.
 Bulk upsert. `rtfm index ./docs`.
 **Done when:** `rtfm index ./docs` populates `rtfm-docs` and a manual query
 returns sensible hits for a known term.
 
 ### Phase 4 — MCP server (Tier 1 retrieval)
 stdio server exposing `search_docs(query, top_k)`. Tier 1 BM25 query across
-keyword + text. Returns chunks with breadcrumb + source. Wire into Claude Code
-via project-scoped `.mcp.json` (§6).
+keyword + text. Returns chunks with breadcrumb + source + `source_modified_at`,
+and instructs the agent to prefer newer sources and flag contradictions
+(§2.13 B). Wire into Claude Code via project-scoped `.mcp.json` (§6).
 **Done when:** from inside Claude Code, asking "what's the endpoint to GET X"
-retrieves the right passage via the tool.
+retrieves the right passage via the tool; and when two docs disagree, the newer
+is preferred and the conflict is surfaced to the user.
 
 ### Phase 5 — Watch mode
 `rtfm watch ./docs` — FileSystemWatcher with debounce, lock retry, delete/rename
