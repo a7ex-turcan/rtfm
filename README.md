@@ -75,6 +75,44 @@ dotnet run --project src/Rtfm.Cli -- search "how are roles mapped to functions"
 dotnet run --project src/Rtfm.Cli -- watch ./docs
 ```
 
+## CLI reference
+
+`rtfm` with no arguments (or `--help`) prints this overview in the terminal.
+
+| Command | Arguments | What it does |
+|---|---|---|
+| `rtfm ping` | — | Health-checks the OpenSearch cluster; color-coded status panel. |
+| `rtfm index` | `<folder> [--project <name>]` | One-shot (re)index of every supported document under `<folder>` — convert → chunk → embed → bulk upsert. Idempotent: re-running replaces each doc's chunks in place. Writes the watch manifest so `watch` starts from a correct baseline. Default project: `default`. |
+| `rtfm watch` | `<folder> [--project <name>]` | Long-running incremental indexer. On start it *reconciles*: anything added/changed/deleted while the watcher was off is caught up. Then edits, adds, renames, and deletes are reflected in the index within seconds (debounced, editor-lock tolerant). Live dashboard on a terminal; plain log lines when redirected. `Ctrl+C` to stop. |
+| `rtfm search` | `<query...> [--project <name> \| --all]` | Hybrid search (BM25 + semantic kNN, fused). Top 5 hits as ranked cards with score bar, heading breadcrumb, source file, project, and last-modified date. No flag or `--all` spans all projects. |
+| `rtfm convert` | `<path>` | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling). |
+| `rtfm chunk` | `<path>` | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs. |
+
+**Supported document formats** (detected by content, not extension): Confluence
+"Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`, and
+Markdown (`.md`/`.markdown`).
+
+**Projects.** Every chunk is tagged with the `--project` it was indexed under
+(default `default`); search and the MCP server filter on it. A file belongs to
+one project at a time — re-indexing it under a new name moves it.
+
+**Output conventions.** Results go to stdout, diagnostics and progress to
+stderr — so piping or redirecting a command yields only the machine-usable
+part, plain and colorless. Exit codes: `0` success, `1` failure, `2` usage
+error.
+
+**Semantic tier.** The first `index`/`search`/`watch` run downloads the local
+embedding model (~90 MB, once per machine, cached under
+`LocalApplicationData/rtfm/models`). If the model can't be fetched (offline),
+commands warn and continue lexical-only — nothing breaks, conceptual queries
+just get weaker until the model is available.
+
+| Environment variable | Meaning |
+|---|---|
+| `RTFM_OPENSEARCH_URL` | OpenSearch endpoint (default `http://localhost:9200`) |
+| `RTFM_PROJECT` | Default project scope for the MCP server (per-call `project` argument overrides; `*` = all) |
+| `RTFM_MODEL_DIR` | Embedding-model cache override (e.g. an offline pre-provisioned copy) |
+
 ### Inspecting the index (optional)
 
 For a visual look at the index while debugging, start OpenSearch Dashboards via
