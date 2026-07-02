@@ -14,6 +14,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- The command name (matches the CLI's `rtfm` pattern): rtfm-mcp.exe /
+         rtfm-mcp.dll, PATH-friendly ahead of Phase 14 packaging. -->
+    <AssemblyName>rtfm-mcp</AssemblyName>
+    <RootNamespace>Rtfm.Mcp</RootNamespace>
   </PropertyGroup>
 
 </Project>

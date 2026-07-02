@@ -176,7 +176,7 @@ everywhere; only `RTFM_PROJECT` changes:
   "mcpServers": {
     "rtfm": {
       "command": "dotnet",
-      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/Rtfm.Mcp.dll"],
+      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/rtfm-mcp.dll"],
       "env": {
         "RTFM_OPENSEARCH_URL": "http://localhost:9200",
         "RTFM_PROJECT": "payments"
