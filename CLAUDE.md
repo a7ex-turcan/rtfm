@@ -398,7 +398,12 @@ project" reuses delete-by-query (§2.9).
 > when scaffolding.
 >
 > **Pinned so far:** `OpenSearch.Net` **1.8.0**; OpenSearch Docker image
-> **2.17.1** (Phase 0). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
+> **2.19.5** (2.17.1 from Phase 0 was upgraded during Phase 18: its hybrid
+> query 500'd — "read past EOF … .nvd" — on specific queries whose BM25 and
+> kNN clauses each worked alone; 2.19.5 fixed it. 2.19 also ships RRF, but
+> retrieval stays on the min_max normalization pipeline — switching is an
+> option, not a need. `DocumentSearch` additionally falls back to lexical
+> per-query if hybrid ever 500s again). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
 > `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b),
 > `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
 > **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +

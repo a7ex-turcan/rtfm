@@ -11,7 +11,7 @@
 #    up stays lean — see the "dashboards" service below.)
 services:
   opensearch:
-    image: opensearchproject/opensearch:2.17.1
+    image: opensearchproject/opensearch:2.19.5
     container_name: rtfm-opensearch
     environment:
       - discovery.type=single-node
@@ -41,7 +41,7 @@ services:
   # "debug" profile. Version-matched to OpenSearch; security disabled to match
   # the cluster above.
   dashboards:
-    image: opensearchproject/opensearch-dashboards:2.17.1
+    image: opensearchproject/opensearch-dashboards:2.19.5
     container_name: rtfm-dashboards
     profiles: ["debug"]
     depends_on:

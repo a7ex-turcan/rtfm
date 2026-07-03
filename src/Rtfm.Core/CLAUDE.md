@@ -28,8 +28,11 @@ library-local rules.
   `DocumentSearch`; don't fight `OpenSearch.Net`'s typed surface. Watch the
   namespace clash: inside `Rtfm.Core.OpenSearch`, `OpenSearch.Net.X` needs the
   `OsHttpMethod`-style alias or `global::`.
-- **OpenSearch is 2.17.x**: `hybrid` query + `normalization-processor` pipeline;
-  **no RRF** (2.19+). If you bump the server image, revisit §2.10.
+- **OpenSearch is 2.19.x**: `hybrid` query + `normalization-processor`
+  pipeline (min_max). RRF exists on this version but is deliberately unused —
+  switching is a §2.10 decision, not a drive-by. History: 2.17's hybrid query
+  500'd ("read past EOF … .nvd") on specific queries; `DocumentSearch` keeps a
+  per-query lexical fallback for any future hybrid server failure.
 
 ## Map
 

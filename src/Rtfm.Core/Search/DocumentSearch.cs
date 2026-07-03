@@ -43,17 +43,28 @@ public sealed class DocumentSearch(
         var wantRerank = reranker is not null && !_rerankerBroken;
         var fetch = wantRerank ? Math.Clamp(topK * 3, 12, 20) : topK;
 
-        string body, json;
+        string json;
         if (vector is not null)
         {
             await EnsurePipelineAsync(cancellationToken).ConfigureAwait(false);
-            body = BuildHybridQuery(query, vector, fetch, project);
-            json = await gateway.SearchAsync(RtfmIndex.Name, body, RtfmIndex.HybridPipelineName, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var body = BuildHybridQuery(query, vector, fetch, project);
+                json = await gateway.SearchAsync(RtfmIndex.Name, body, RtfmIndex.HybridPipelineName, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Server-side hybrid failures happen (observed: an OpenSearch
+                // 2.17 hybrid-scoring bug 500ing on specific queries). Degrade
+                // to lexical for THIS query — no sticky flag; the next query
+                // tries hybrid again.
+                _log($"rtfm: hybrid search failed, retrying lexical-only: {ex.Message}");
+                json = await gateway.SearchAsync(RtfmIndex.Name, BuildQuery(query, fetch, project), searchPipeline: null, cancellationToken).ConfigureAwait(false);
+            }
         }
         else
         {
-            body = BuildQuery(query, fetch, project);
-            json = await gateway.SearchAsync(RtfmIndex.Name, body, searchPipeline: null, cancellationToken).ConfigureAwait(false);
+            json = await gateway.SearchAsync(RtfmIndex.Name, BuildQuery(query, fetch, project), searchPipeline: null, cancellationToken).ConfigureAwait(false);
         }
 
         var hits = ParseHits(json);
