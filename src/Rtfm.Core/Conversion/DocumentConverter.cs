@@ -15,6 +15,7 @@ public sealed class DocumentConverter
     private readonly CsvConverter _csv = new();
     private readonly DrawioConverter _drawio = new();
     private readonly ImageConverter _image = new();
+    private readonly SqlConverter _sql = new();
 
     /// <summary>Converts the file at <paramref name="path"/> to markdown.</summary>
     public ConversionResult Convert(string path)
@@ -41,6 +42,7 @@ public sealed class DocumentConverter
             SourceFormat.Csv => _csv.Convert(stream, path),
             SourceFormat.Drawio => _drawio.Convert(stream, path),
             SourceFormat.Image => _image.Convert(stream, path),
+            SourceFormat.Sql => _sql.Convert(stream, path),
             _ => throw new NotSupportedException(
                 $"Unrecognized document format: {path}"),
         };

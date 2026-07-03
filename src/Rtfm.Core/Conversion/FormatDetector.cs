@@ -82,6 +82,11 @@ public static class FormatDetector
             return SourceFormat.Drawio;
         }
 
+        if (ext.Equals(".sql", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Sql;
+        }
+
         return SourceFormat.Unknown;
     }
 

@@ -27,7 +27,7 @@ documents leaving your machine.
 docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
 (.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
  .pdf .xlsx .csv    · index               index          + 7 more (MCP)
- .drawio .png .jpg)
+ .drawio .png .jpg .sql)
 ```
 
 Three independent processes, each with its own lifecycle:
@@ -232,9 +232,12 @@ section with its data as a table), CSV (one table, header row preserved
 across chunk splits), draw.io `.drawio` diagrams (each page becomes a
 section listing its shapes — ER tables with their columns — and its
 connections as `A → B` relations, so "which tables reference X" is answerable
-from a diagram; both plain and compressed pages supported), and standalone
+from a diagram; both plain and compressed pages supported), standalone
 images `.png`/`.jpg` (OCR'd — screenshots and whiteboard photos become
-searchable documents).
+searchable documents), and SQL schema files `.sql` (structurally parsed:
+each table becomes its own section with columns, PK/FK flags, `COMMENT ON`
+descriptions, and a computed "Referenced by" reverse index — dialect-tolerant,
+tested against Postgres and T-SQL dumps).
 
 **Projects.** Every chunk is tagged with the `--project` it was indexed under
 (default `default`); search and the MCP server filter on it. A file belongs to

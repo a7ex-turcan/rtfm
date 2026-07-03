@@ -385,6 +385,7 @@ project" reuses delete-by-query (§2.9).
 | CSV → markdown (Phase 9) | none — small built-in RFC 4180-ish parser |
 | draw.io → markdown (Phase 15) | none — XLinq + DeflateStream (+ AngleSharp for labels) |
 | OCR for PDF-embedded images (Phase 16) + standalone images (Phase 17) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
+| SQL schema files (Phase 18) | none — built-in dialect-tolerant DDL scanner |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -969,6 +970,37 @@ the plain `.drawio` exists). Verified live: a runbook screenshot OCR'd
 character-perfect (including the CLI command `rtctl vip rotate --cluster eu`)
 and "how do I rotate the VIP during failover" answers at #1 (1.00). 124/124
 tests.
+
+### Phase 18 — SQL schema files (.sql) ✅ **Done**
+Entire DB schemas live in reference `.sql` files outside any codebase. Plain
+text would index, but a *structural* parse is worth it: per-table chunks (the
+Phase 15 granularity lesson, applied) and an explicit relation graph.
+**Done when:** a real schema dump indexes and "which tables reference X"
+answers from the right table's own chunk.
+
+*Delivered:* `SqlConverter` — a dialect-tolerant DDL scanner (no parser
+dependency; full SQL grammars are dialect quicksand and a reference file must
+never fail conversion). Comment-stripping and statement-splitting respect
+string literals and Postgres dollar-quoted bodies; `CREATE TABLE` bodies are
+balanced-paren captured and split at top level. Extracted: columns (name,
+type, PK/NOT NULL/UNIQUE/DEFAULT/auto flags — table-level `PRIMARY KEY (…)`
+constraints mark their columns too), foreign keys (inline `REFERENCES` *and*
+`ALTER TABLE … ADD CONSTRAINT`), `COMMENT ON TABLE/COLUMN` descriptions, and
+secondary objects (views with definition snippets, indexes, `AS ENUM` types
+with values, functions/triggers/sequences). Rendering: `## Table: X` per table
+→ its own breadcrumbed chunk, with FK annotations on columns **and** a
+computed **Referenced by** reverse line, so "which tables reference X" is
+answerable from either side; plus a `## Relationships` overview and an
+"Also contains: N data statements" tally. Anything unrecognized is counted,
+never fatal; a file with no recognizable DDL falls back to a fenced ```sql
+block (still lexically searchable). Verified on the real corpus: two
+production **T-SQL** dumps (`dbo.` schemas, bracketed `[char](18)` types)
+parse fully — 18 + 51 chunks — and "which tables reference the Bundle table"
+answers from `dbo.Bundle`'s own chunk at **0.97** (vs the drawio all-entities
+chunk scoring 0.00 — per-object granularity vindicated). This validation also
+flushed out an OpenSearch 2.17 hybrid bug (see the §3 pin note / Phase 6
+delivered note context): fixed by the 2.19.5 upgrade + per-query lexical
+fallback. 133/133 tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

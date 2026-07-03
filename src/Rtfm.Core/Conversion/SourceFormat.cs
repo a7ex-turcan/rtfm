@@ -32,4 +32,7 @@ public enum SourceFormat
 
     /// <summary>Standalone PNG/JPEG image, OCR'd (Phase 17).</summary>
     Image,
+
+    /// <summary>SQL schema file (.sql), structurally parsed (Phase 18).</summary>
+    Sql,
 }

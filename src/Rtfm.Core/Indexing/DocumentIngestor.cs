@@ -18,7 +18,7 @@ public sealed class DocumentIngestor
 {
     /// <summary>Extensions RTFM will index (§2.5). Content is sniffed on convert; the extension only gates discovery.</summary>
     public static readonly IReadOnlySet<string> SupportedExtensions =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".doc", ".docx", ".md", ".markdown", ".pdf", ".xlsx", ".csv", ".drawio", ".png", ".jpg", ".jpeg" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".doc", ".docx", ".md", ".markdown", ".pdf", ".xlsx", ".csv", ".drawio", ".png", ".jpg", ".jpeg", ".sql" };
 
     private readonly DocumentConverter _converter;
     private readonly MarkdownChunker _chunker;
