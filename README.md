@@ -222,22 +222,10 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm convert` | `<path>` | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling). |
 | `rtfm chunk` | `<path>` | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs. |
 
-**Supported document formats** (detected by content, not extension): Confluence
-"Export to Word" files (`.doc` — actually MHTML), genuine Word `.docx`,
-Markdown (`.md`/`.markdown`), PDF (headings inferred from font sizes — expect
-flatter structure than Word exports; **embedded raster images are OCR'd**, so
-diagrams saved as pictures still contribute their labels — fully local, models
-ship with the tool), Excel `.xlsx` (each sheet becomes a
-section with its data as a table), CSV (one table, header row preserved
-across chunk splits), draw.io `.drawio` diagrams (each page becomes a
-section listing its shapes — ER tables with their columns — and its
-connections as `A → B` relations, so "which tables reference X" is answerable
-from a diagram; both plain and compressed pages supported), standalone
-images `.png`/`.jpg` (OCR'd — screenshots and whiteboard photos become
-searchable documents), and SQL schema files `.sql` (structurally parsed:
-each table becomes its own section with columns, PK/FK flags, `COMMENT ON`
-descriptions, and a computed "Referenced by" reverse index — dialect-tolerant,
-tested against Postgres and T-SQL dumps).
+**Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
+`.pdf`, `.xlsx`, `.csv`, `.drawio`, `.png`/`.jpg`, `.sql` — each with a
+format-aware extractor, not a dumb text dump. See
+[Supported formats & how they're read](#supported-formats--how-theyre-read).
 
 **Projects.** Every chunk is tagged with the `--project` it was indexed under
 (default `default`); search and the MCP server filter on it. A file belongs to
@@ -261,6 +249,85 @@ nothing breaks.
 | `RTFM_PROJECT` | Default project scope for the MCP server (per-call `project` argument overrides; `*` = all) |
 | `RTFM_MODEL_DIR` | Embedding-model cache override (e.g. an offline pre-provisioned copy) |
 | `RTFM_GENERATED_DIR` | Where `save_document` stores agent-generated docs (default `LocalApplicationData/rtfm/generated`; point it at a committed folder to get generated analyses reviewed) |
+
+## Supported formats & how they're read
+
+Every format gets a dedicated extractor whose job is to surface the *knowledge*
+in the file, not just its bytes. Two rules apply across the board:
+
+- **Detection is by content, not extension.** Files are sniffed (magic bytes,
+  MIME headers, container inspection) because extensions lie — the flagship
+  example being Confluence's `.doc` exports, which aren't Word files at all.
+- **Everything converges on markdown**, which is then split into heading-aware
+  chunks carrying a breadcrumb (`Doc > Section > Subsection`), the source
+  path, and the document's own modified date where the format embeds one
+  (file mtime otherwise). Chunking, embedding, and search are identical for
+  all formats — only the front end differs.
+
+**`.doc` — Confluence "Export to Word" (actually MHTML).** Despite the
+extension these are MIME `multipart/related` containers holding
+quoted-printable HTML. MimeKit unpacks the container, the HTML part is
+decoded, Confluence chrome (page footers, Jira macro tables, layout wrappers)
+is stripped in a DOM pass, and the result renders to markdown with the real
+`h1–h3` hierarchy intact. The MIME `Date:` header supplies the modified date.
+
+**`.docx` — genuine Word.** Mammoth maps the document's *paragraph styles* to
+semantic HTML — a paragraph styled `Heading 1` becomes `<h1>` — then the same
+strip-and-render tail as MHTML. The embedded `dcterms:modified` property
+supplies the date. Caveat: headings that were manually bolded instead of
+styled flatten to plain paragraphs (Word can't tell us they were headings).
+
+**`.md` — Markdown.** Already the target format: a passthrough with light
+normalization; the first heading becomes the title.
+
+**`.pdf`.** PDFs carry no real heading semantics, so structure is inferred:
+the dominant font size is taken as body text, and short lines set noticeably
+larger (or bold) become headings — larger size, higher level. Paragraphs are
+rebuilt from line spacing. **Embedded raster images are OCR'd** (see images
+below), so a diagram pasted into a PDF still contributes its labels as
+`[Image text]` paragraphs. PDF `D:` date strings supply the modified date.
+Expect flatter structure than Word exports; tables are extracted as text in
+reading order, not reconstructed.
+
+**`.xlsx` — Excel.** Each visible sheet becomes a section (breadcrumb
+`workbook > sheet`) with its used range as a pipe table — first row as header,
+formulas contributing their *computed* values. Oversized sheets are split by
+rows with the header row repeated, so every chunk stays self-describing. The
+workbook's modified property supplies the date.
+
+**`.csv`.** A small built-in RFC 4180-ish parser (quoted fields, doubled-quote
+escapes, newlines inside quotes) with a delimiter sniff (comma / semicolon /
+tab — European exports welcome). One pipe table, filename as title, header
+preserved across chunk splits.
+
+**`.drawio` — diagrams as graphs, not pictures.** The mxfile XML is parsed
+per page, handling both modern plain pages and the classic compressed
+encoding (base64 → raw DEFLATE → URI-decode). Each page becomes a section
+listing its **Shapes** — containers inline their children, so an ER table
+reads `accounts — PK account_id; tenant_name` — and its **Connections** as
+`A → B: label` lines with edge endpoints resolved to the nearest labeled
+shape. "Which tables reference X?" is answerable from a diagram. Labels that
+are HTML fragments are stripped; metadata-wrapped shapes (e.g. Mermaid
+imports) resolve their names through the wrapper.
+
+**`.png` / `.jpg` — OCR.** Standalone images run through a local OCR engine
+(PaddleOCR PP-OCRv5 on ONNX Runtime — the models ship inside the tool, no
+download, nothing leaves the machine). Screenshots, exported diagram bitmaps,
+and whiteboard photos become searchable documents; text extraction is
+accurate down to CLI commands with flags. The same engine handles images
+embedded in PDFs.
+
+**`.sql` — schemas, parsed structurally.** Not treated as plain text: a
+dialect-tolerant DDL scanner (tested against Postgres and T-SQL dumps)
+extracts tables with columns, types, and PK / NOT NULL / UNIQUE / DEFAULT
+flags; foreign keys both inline and from `ALTER TABLE`; `COMMENT ON`
+descriptions; and secondary objects (views, indexes, enums with their
+values). Each table renders as **its own section — its own chunk** — with FK
+targets on columns and a computed **"Referenced by"** reverse index, so
+"which tables reference X" answers from either side; a Relationships overview
+maps the whole graph. Seed `INSERT`s are tallied, not indexed. A file with no
+recognizable DDL falls back to a fenced `sql` block — still searchable, never
+an error.
 
 ### Inspecting the index (optional)
 
