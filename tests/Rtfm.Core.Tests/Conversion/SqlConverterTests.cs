@@ -110,11 +110,11 @@ public class SqlConverterTests
     [InlineData("\"Public\".\"Accounts\"", "accounts", false)] // CleanIdentifier strips quotes before compare
     [InlineData("users", "accounts", false)]
     public void Table_name_matching_ignores_schema_qualification(string a, string b, bool equal)
-        => Assert.Equal(equal, SqlConverter.TableNamesEqual(a, b));
+        => Assert.Equal(equal, SqlSchemaRenderer.TableNamesEqual(a, b));
 
     [Fact]
     public void Quoted_identifier_matching_works_after_cleaning()
-        => Assert.True(SqlConverter.TableNamesEqual(SqlConverter.CleanIdentifier("\"Public\".\"Accounts\""), "ACCOUNTS"));
+        => Assert.True(SqlSchemaRenderer.TableNamesEqual(SqlConverter.CleanIdentifier("\"Public\".\"Accounts\""), "ACCOUNTS"));
 
     private static ConversionResult Convert(string sql, string path)
     {

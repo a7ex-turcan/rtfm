@@ -26,9 +26,11 @@
     <PackageReference Include="AngleSharp" Version="1.5.1" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Mammoth" Version="1.11.0" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageReference Include="MimeKit" Version="4.17.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="OpenSearch.Net" Version="1.8.0" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
     <PackageReference Include="RapidOcrNet" Version="2.0.0" />

@@ -87,6 +87,11 @@ public static class FormatDetector
             return SourceFormat.Sql;
         }
 
+        if (ext.Equals(".rtfmdb", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Database;
+        }
+
         return SourceFormat.Unknown;
     }
 

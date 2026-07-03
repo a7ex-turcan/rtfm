@@ -386,6 +386,7 @@ project" reuses delete-by-query (§2.9).
 | draw.io → markdown (Phase 15) | none — XLinq + DeflateStream (+ AngleSharp for labels) |
 | OCR for PDF-embedded images (Phase 16) + standalone images (Phase 17) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
 | SQL schema files (Phase 18) | none — built-in dialect-tolerant DDL scanner |
+| Live DB schema pull (Phase 20) | `Microsoft.Data.SqlClient` + `Npgsql` via INFORMATION_SCHEMA |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -1034,6 +1035,37 @@ gap-question hits the generated doc's `Missing bits` section #1; re-save same
 title → `replaced=true`, chunks 3→2 (no accumulation); `list_sources` shows
 it. `rtfm purge` drops its chunks; the files are sources and stay (delete the
 folder to forget them). 140/140 tests.
+
+### Phase 20 — Live DB schema connector (`.rtfmdb`) ✅ **Done**
+A `.sql` dump is a photograph; a connector descriptor is a window. A small
+JSON file in the docs folder tells RTFM to pull the schema from a live
+database at ingest time and render it through the Phase 18 engine — the
+schema can never go stale.
+**Done when:** a `.rtfmdb` pointing at a live database indexes its schema with
+per-table chunks and answers "which tables reference X".
+
+*Delivered:* `DbDescriptor` (`provider`, `connectionString`, optional `name` /
+`schemas` filter) + `DatabaseSchemaConverter`, sharing the schema model and
+renderer extracted from `SqlConverter` into `SqlSchemaModel.cs`
+(`SqlSchemaRenderer`) — both routes produce identical per-table chunks, FK
+annotations, and the Referenced-by reverse index. **Secrets never sit in the
+file:** connection strings support `${ENV_VAR}` placeholders, expanded at
+ingest, failing loudly on missing vars. Providers: **sqlserver**
+(`Microsoft.Data.SqlClient` 7.0.2) and **postgres** (`Npgsql` 10.0.3);
+metadata via portable `INFORMATION_SCHEMA` queries (tables/columns with
+NOT NULL + defaults, PKs, composite-safe FKs grouped per constraint, views);
+table/column *descriptions* via provider-specific catalogs
+(`pg_description` / `sys.extended_properties` MS_Description), best-effort.
+System schemas filtered. Stays inside the §2.4 batch model: the pull happens
+when the descriptor is ingested — every `rtfm index` run refreshes it, watch
+re-pulls when the file changes — and `source_modified_at` is the pull time,
+with a provenance line ("Live schema pulled from … on …") in the markdown.
+Verified live against a throwaway Postgres 16 container: comments, FK flags,
+Referenced-by, and the view all extracted; "which tables reference the
+accounts table" hit `Table: public.accounts` at **1.00**. SQL Server path is
+implemented against the same INFORMATION_SCHEMA standard but live-validated
+only for Postgres so far — exercise it on a real MSSQL box when convenient.
+147/147 tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

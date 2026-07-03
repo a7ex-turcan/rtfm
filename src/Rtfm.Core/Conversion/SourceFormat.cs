@@ -35,4 +35,7 @@ public enum SourceFormat
 
     /// <summary>SQL schema file (.sql), structurally parsed (Phase 18).</summary>
     Sql,
+
+    /// <summary>Live database schema via a .rtfmdb connector descriptor (Phase 20).</summary>
+    Database,
 }

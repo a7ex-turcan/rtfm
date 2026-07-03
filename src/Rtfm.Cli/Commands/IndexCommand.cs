@@ -36,7 +36,7 @@ internal static class IndexCommand
         var files = DocumentIngestor.EnumerateSupportedFiles(folder).ToList();
         if (files.Count == 0)
         {
-            Console.Error.WriteLine($"rtfm index: no supported documents (.doc/.docx/.md/.pdf/.xlsx/.csv/.drawio/.png/.jpg/.sql) under {folder}");
+            Console.Error.WriteLine($"rtfm index: no supported documents (.doc/.docx/.md/.pdf/.xlsx/.csv/.drawio/.png/.jpg/.sql/.rtfmdb) under {folder}");
             return 1;
         }
 

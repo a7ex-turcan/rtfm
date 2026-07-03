@@ -27,7 +27,8 @@ documents leaving your machine.
 docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
 (.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
  .pdf .xlsx .csv    · index               index          + 7 more (MCP)
- .drawio .png .jpg .sql)
+ .drawio .png .jpg
+ .sql .rtfmdb)
 ```
 
 Three independent processes, each with its own lifecycle:
@@ -223,9 +224,9 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm chunk` | `<path>` | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs. |
 
 **Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
-`.pdf`, `.xlsx`, `.csv`, `.drawio`, `.png`/`.jpg`, `.sql` — each with a
-format-aware extractor, not a dumb text dump. See
-[Supported formats & how they're read](#supported-formats--how-theyre-read).
+`.pdf`, `.xlsx`, `.csv`, `.drawio`, `.png`/`.jpg`, `.sql`, `.rtfmdb` (live DB
+schema connector) — each with a format-aware extractor, not a dumb text dump.
+See [Supported formats & how they're read](#supported-formats--how-theyre-read).
 
 **Projects.** Every chunk is tagged with the `--project` it was indexed under
 (default `default`); search and the MCP server filter on it. A file belongs to
@@ -316,6 +317,21 @@ download, nothing leaves the machine). Screenshots, exported diagram bitmaps,
 and whiteboard photos become searchable documents; text extraction is
 accurate down to CLI commands with flags. The same engine handles images
 embedded in PDFs.
+
+**`.rtfmdb` — live database schemas.** A small JSON connector descriptor —
+not a document, a *window*: at every index run RTFM connects to the database
+it names (`"provider": "sqlserver"` or `"postgres"`), pulls the schema from
+`INFORMATION_SCHEMA`, and renders it exactly like a parsed `.sql` dump (below)
+— per-table sections, FK annotations, Referenced-by reverse index — plus
+table/column descriptions from the database's own comment catalogs, and a
+provenance line with the pull time. Unlike a dump, it can never go stale.
+Connection strings support `${ENV_VAR}` placeholders — **use them; never put
+credentials in the file** (docs folders get shared and committed):
+
+```json
+{ "provider": "postgres", "name": "Billing reference DB",
+  "connectionString": "Host=db.internal;Username=readonly;Password=${BILLING_DB_PW};Database=billing" }
+```
 
 **`.sql` — schemas, parsed structurally.** Not treated as plain text: a
 dialect-tolerant DDL scanner (tested against Postgres and T-SQL dumps)
