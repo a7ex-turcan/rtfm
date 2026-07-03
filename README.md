@@ -351,6 +351,55 @@ Notes:
   first search, and holds a lock on the built DLL — disconnect instances (or
   restart Claude Code) before rebuilding rtfm.
 
+### Using RTFM from Claude Desktop
+
+Claude Desktop shares the same index, notes, and generated documents — a
+document you saved from a Claude Code session is retrievable from a Desktop
+chat. The wiring differs from Claude Code in three ways: Desktop has its own
+config file, it does **not** expand `${VAR}` placeholders (use absolute
+paths), and it doesn't read your shell profile (so don't rely on PATH or
+`RTFM_HOME` there).
+
+Edit the config (Settings → Developer → Edit Config, or open it directly):
+
+| OS | Config file |
+|---|---|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+
+Add an `mcpServers` block (keep whatever else is in the file), with the
+**absolute** path to your built DLL:
+
+```json
+{
+  "mcpServers": {
+    "rtfm": {
+      "command": "dotnet",
+      "args": ["D:\\Projects\\rtfm\\src\\Rtfm.Mcp\\bin\\Release\\net10.0\\rtfm-mcp.dll"],
+      "env": {
+        "RTFM_OPENSEARCH_URL": "http://localhost:9200"
+      }
+    }
+  }
+}
+```
+
+(macOS: `"args": ["/Users/you/src/rtfm/src/Rtfm.Mcp/bin/Release/net10.0/rtfm-mcp.dll"]`.
+If `dotnet` isn't found when launched from the Dock, use its absolute path
+too, e.g. `/usr/local/share/dotnet/dotnet`.)
+
+Notes:
+
+- **Restart means full quit** — Claude Desktop stays resident; quit it from
+  the tray/menu-bar icon, then relaunch. The `rtfm` tools appear under the
+  chat input's tools/connectors icon.
+- **Project scope:** Desktop isn't bound to a repo, so omitting `RTFM_PROJECT`
+  (= search all projects, every hit attributed) is the sensible default. Add
+  `"RTFM_PROJECT": "yourproject"` to the `env` block to pin it.
+- OpenSearch must be running (`rtfm init`, or Docker Desktop autostart).
+- A running Desktop session holds the same DLL lock as any other instance —
+  quit it before rebuilding rtfm.
+
 ## Documentation
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, locked design decisions, tech stack,
