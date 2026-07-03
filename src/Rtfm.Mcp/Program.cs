@@ -34,6 +34,15 @@ builder.Services.AddSingleton(sp => new DocumentSearch(
 builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
 builder.Services.AddSingleton(sp => new Rtfm.Core.Contradictions.ContradictionDetector(sp.GetRequiredService<OpenSearchGateway>()));
 
+// Phase 19 write-back: save_document ingests through the same pipeline the CLI
+// uses (embedder + contradiction detection included).
+builder.Services.AddSingleton(sp => new Rtfm.Core.Indexing.DocumentIngestor(
+    new Rtfm.Core.Indexing.DocumentIndexer(sp.GetRequiredService<OpenSearchGateway>()),
+    sp.GetRequiredService<ITextEmbedder>(),
+    sp.GetRequiredService<Rtfm.Core.Contradictions.ContradictionDetector>()));
+builder.Services.AddSingleton(sp => new Rtfm.Core.Generated.GeneratedDocumentStore(
+    sp.GetRequiredService<Rtfm.Core.Indexing.DocumentIngestor>()));
+
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()

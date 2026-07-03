@@ -49,6 +49,11 @@ framing and the server silently fails to connect.
   enforce the human-in-the-loop precondition (explicit user confirmation in
   the conversation before calling) — keep that language intact; it is the
   §2.13 C safety model.
+- `save_document(title, markdown, project?, author?)` (`DocumentTools`,
+  Phase 19) — agent write-back via `GeneratedDocumentStore`: real file under
+  `RTFM_GENERATED_DIR`, ingested through the full pipeline (this is why Mcp DI
+  now carries `DocumentIngestor` + the contradiction detector). Same title =
+  replace. The description's user-direction precondition is load-bearing.
 - Scope for every tool resolves through
   `RtfmEnvironment.ResolveProjectScope` (`RTFM_PROJECT` default, per-call
   override, `*`/`all` sentinel).

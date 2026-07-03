@@ -21,6 +21,32 @@ public static class RtfmEnvironment
     /// <summary>Environment variable pointing at the rtfm clone (multi-repo `.mcp.json` resolution, README).</summary>
     public const string RtfmHomeVariable = "RTFM_HOME";
 
+    /// <summary>Environment variable overriding where agent-generated documents are stored (Phase 19).</summary>
+    public const string GeneratedDirectoryVariable = "RTFM_GENERATED_DIR";
+
+    /// <summary>
+    /// Root folder for agent-generated documents (<c>save_document</c>).
+    /// Defaults to <c>LocalApplicationData/rtfm/generated</c>;
+    /// <c>RTFM_GENERATED_DIR</c> overrides (e.g. a folder inside the team's
+    /// docs share so generated analyses get committed/reviewed).
+    /// </summary>
+    public static string ResolveGeneratedDirectory()
+    {
+        var value = Environment.GetEnvironmentVariable(GeneratedDirectoryVariable);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            baseDir = Path.GetTempPath();
+        }
+
+        return Path.Combine(baseDir, "rtfm", "generated");
+    }
+
     /// <summary>The rtfm clone directory when <c>RTFM_HOME</c> is set and exists, else null.</summary>
     public static string? ResolveRtfmHome()
     {

@@ -260,6 +260,7 @@ nothing breaks.
 | `RTFM_OPENSEARCH_URL` | OpenSearch endpoint (default `http://localhost:9200`) |
 | `RTFM_PROJECT` | Default project scope for the MCP server (per-call `project` argument overrides; `*` = all) |
 | `RTFM_MODEL_DIR` | Embedding-model cache override (e.g. an offline pre-provisioned copy) |
+| `RTFM_GENERATED_DIR` | Where `save_document` stores agent-generated docs (default `LocalApplicationData/rtfm/generated`; point it at a committed folder to get generated analyses reviewed) |
 
 ### Inspecting the index (optional)
 
@@ -286,6 +287,7 @@ It exposes four tools:
 | `list_contradictions(project?, top_k)` | Nominated doc-vs-doc disagreements within a project (newer vs older side, dates, excerpts) — the agent verifies and surfaces conflicts |
 | `add_note(text, project?, path?, author?)` | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first) |
 | `list_notes(project?)` / `remove_note(id)` | Review / delete override notes (removal only on explicit user request) |
+| `save_document(title, markdown, project?, author?)` | Persist an LLM-produced analysis/report into the corpus ("remember this via rtfm") — written as a real `.md` under `RTFM_GENERATED_DIR`, indexed immediately, provenance line added, same title replaces |
 
 Scope for all tools is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or
 pass `project="*"` to search across all projects). Path arguments accept the

@@ -1007,6 +1007,34 @@ flushed out an OpenSearch 2.17 hybrid bug (see the §3 pin note / Phase 6
 delivered note context): fixed by the 2.19.5 upgrade + per-query lexical
 fallback. 133/133 tests.
 
+### Phase 19 — Agent write-back: `save_document` ✅ **Done**
+The workflow: "analyze this feature, identify the missing bits, and remember
+them via rtfm." LLM-produced documents (analyses, gap lists, decision records)
+become part of the corpus — retrievable by every future session.
+**Done when:** a document saved over MCP is immediately findable by
+`search_docs`, updates in place on re-save, and carries visible provenance.
+
+*Delivered:* `GeneratedDocumentStore` in Core + the `save_document` MCP tool
+(the server's first ingest-side services: `DocumentIngestor` + detector now in
+Mcp DI). The derived-index model holds: the markdown is written as a **real
+`.md` file** under `RTFM_GENERATED_DIR` (default
+`LocalApplicationData/rtfm/generated/<project>/`) and ingested through the
+normal convert→chunk→embed→index pipeline — the file stays the source of
+truth and the folder can always be re-indexed. Same title + project → same
+slug → same file → **replaced, not duplicated** (delete-by-query semantics do
+the rest), so "update the analysis" is just re-saving the title. A provenance
+line ("LLM-assisted document, saved by … on …") is prepended automatically —
+without it, fresh generated content would outrank stale-but-authoritative
+sources on recency (§2.13 B) with no disclosure; a duplicate leading H1 from
+the agent is deduped. Contradiction detection runs on save (a generated
+analysis disagreeing with the docs gets nominated). Tool description enforces
+user direction ("remember this via rtfm") — never persist on the agent's own
+initiative. Verified over raw stdio: save → 3 chunks + real file; a
+gap-question hits the generated doc's `Missing bits` section #1; re-save same
+title → `replaced=true`, chunks 3→2 (no accumulation); `list_sources` shows
+it. `rtfm purge` drops its chunks; the files are sources and stay (delete the
+folder to forget them). 140/140 tests.
+
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness
 surfacing is the mitigation), web UI (the LLM client is the UX, §2.11), cloud
