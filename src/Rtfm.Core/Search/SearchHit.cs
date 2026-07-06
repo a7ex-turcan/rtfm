@@ -24,4 +24,5 @@ public sealed record SearchHit(
     DateTimeOffset? SourceModifiedAt,
     string Origin = "doc",
     string? Author = null,
-    IReadOnlyList<NoteAnnotation>? Annotations = null);
+    IReadOnlyList<NoteAnnotation>? Annotations = null,
+    int? Ordinal = null);

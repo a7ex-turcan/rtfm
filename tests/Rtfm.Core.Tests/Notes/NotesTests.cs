@@ -38,6 +38,21 @@ public class NotesTests
     }
 
     [Fact]
+    public void Note_ids_are_deterministic_so_retries_upsert()
+    {
+        var id = NotesStore.DeterministicId("pam", "The default role is super-admin.", "d:/docs/rbac.doc");
+
+        // Same inputs → same id (a timed-out add_note retried lands on the same document).
+        Assert.Equal(id, NotesStore.DeterministicId("pam", "The default role is super-admin.", "d:/docs/rbac.doc"));
+        Assert.Matches("^[0-9a-f]{16}$", id);
+
+        // Any differing input → a different note.
+        Assert.NotEqual(id, NotesStore.DeterministicId("billing", "The default role is super-admin.", "d:/docs/rbac.doc"));
+        Assert.NotEqual(id, NotesStore.DeterministicId("pam", "The default role is admin.", "d:/docs/rbac.doc"));
+        Assert.NotEqual(id, NotesStore.DeterministicId("pam", "The default role is super-admin.", null));
+    }
+
+    [Fact]
     public void NoteToHit_is_visibly_attributed_never_a_doc()
     {
         var note = new Note("abc123", "pam", "The default role is super-admin.", "d:/docs/rbac.doc", "alex", When);

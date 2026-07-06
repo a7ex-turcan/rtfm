@@ -343,7 +343,7 @@ public sealed class DocumentSearch(
     }
 
     private static readonly string[] SourceFields =
-        ["project", "source_path", "heading_path", "title", "content", "source_modified_at"];
+        ["project", "source_path", "heading_path", "title", "content", "source_modified_at", "ordinal"];
 
     private static object LexicalClause(string query) => new
     {
@@ -379,7 +379,10 @@ public sealed class DocumentSearch(
                 HeadingPath: GetString(source, "heading_path") ?? string.Empty,
                 Title: GetString(source, "title"),
                 Content: GetString(source, "content") ?? string.Empty,
-                SourceModifiedAt: TryGetDate(source, "source_modified_at")));
+                SourceModifiedAt: TryGetDate(source, "source_modified_at"),
+                Ordinal: source.TryGetProperty("ordinal", out var ordinal) && ordinal.ValueKind == JsonValueKind.Number
+                    ? ordinal.GetInt32()
+                    : null));
         }
 
         return hits;

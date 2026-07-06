@@ -39,9 +39,10 @@ public static class SearchDocsTool
         never as document content. A doc hit carrying `annotations` has confirmed corrections attached:
         read them before trusting that passage.
 
-        Follow-ups: each hit carries its `path` — pass it to get_document for the full page when the
-        answer sprawls past the chunk, or to find_similar for related documents. list_sources shows
-        what's indexed at all.
+        Follow-ups: each hit carries its `path` and chunk `ordinal` — pass them to get_document when
+        the answer sprawls past the chunk (use around_ordinal to fetch just the surrounding section
+        of a long document), or the path to find_similar for related documents. list_sources shows
+        what's indexed at all; list_projects shows what projects exist.
         """)]
     public static async Task<SearchDocsResult> SearchDocs(
         DocumentSearch search,
@@ -64,6 +65,7 @@ public static class SearchDocsTool
                 Path: h.SourcePath,
                 HeadingPath: h.HeadingPath,
                 SourceModifiedAt: h.SourceModifiedAt?.ToString("yyyy-MM-dd"),
+                Ordinal: h.Ordinal,
                 Text: h.Content,
                 Origin: h.Origin,
                 Author: h.Author,
@@ -85,6 +87,7 @@ public sealed record SearchDocsHit(
     string Path,
     string HeadingPath,
     string? SourceModifiedAt,
+    int? Ordinal,
     string Text,
     string Origin = "doc",
     string? Author = null,

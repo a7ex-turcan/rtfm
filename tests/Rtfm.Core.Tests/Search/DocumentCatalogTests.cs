@@ -96,6 +96,22 @@ public class DocumentCatalogTests
     }
 
     [Fact]
+    public void Chunks_query_windows_on_ordinal_when_a_range_is_given()
+    {
+        using var doc = JsonDocument.Parse(
+            DocumentCatalog.BuildChunksQuery("d:/docs/a.doc", exact: true, project: null, withVectors: false, ordinalRange: (3, 7)));
+
+        var filters = doc.RootElement.GetProperty("query").GetProperty("bool").GetProperty("filter");
+        var range = filters[1].GetProperty("range").GetProperty("ordinal");
+
+        Assert.Equal(3, range.GetProperty("gte").GetInt32());
+        Assert.Equal(7, range.GetProperty("lte").GetInt32());
+        // Without a range, no range clause sneaks in.
+        using var whole = JsonDocument.Parse(DocumentCatalog.BuildChunksQuery("d:/docs/a.doc", exact: true, project: null, withVectors: false));
+        Assert.Equal(1, whole.RootElement.GetProperty("query").GetProperty("bool").GetProperty("filter").GetArrayLength());
+    }
+
+    [Fact]
     public void List_sources_query_aggregates_by_path_with_first_chunk_metadata()
     {
         using var doc = JsonDocument.Parse(DocumentCatalog.BuildListSourcesQuery("pam"));

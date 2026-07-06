@@ -261,12 +261,17 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-The tool surface is now eight tools: `search_docs`; the Phase 8 additions —
-`get_document(path, project?)` (full reassembled page), `list_sources(project?)`
-(corpus awareness), `find_similar(path, top_k?, project?)` (related docs via
-chunk-vector centroid); `list_contradictions(project?, top_k?)` (Phase 12
-nominations); and the Phase 13 correction tools — `add_note` (human-confirmed
-only), `list_notes`, `remove_note`.
+The tool surface is now eleven tools: `search_docs` (hits carry chunk
+`ordinal` since Phase 21); the Phase 8 additions —
+`get_document(path, project?, around_ordinal?, radius?)` (full reassembled
+page, or just the section around a hit), `list_sources(project?, full?)`
+(corpus awareness; unscoped calls summarize per project),
+`find_similar(path, top_k?, project?)` (related docs via chunk-vector
+centroid); `list_contradictions(project?, top_k?)` (Phase 12 nominations);
+the Phase 13 correction tools — `add_note` (human-confirmed only; retry-safe
+deterministic ids), `list_notes`, `remove_note`; `save_document` (Phase 19
+write-back); and the Phase 21 additions — `list_projects` (project
+discovery) and `ping` (fast liveness probe).
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -1066,6 +1071,95 @@ accounts table" hit `Table: public.accounts` at **1.00**. SQL Server path is
 implemented against the same INFORMATION_SCHEMA standard but live-validated
 only for Postgres so far — exercise it on a real MSSQL box when convenient.
 147/147 tests.
+
+### Phase 21 — Retrieval UX quick wins (first-user feedback) ✅ **Done**
+The first real dogfooding session (2026-07) produced a ranked feedback list;
+this phase is the cheap-and-high-leverage half. Six independent items, no
+mapping changes:
+- **Project discovery** — a `list_projects` MCP tool (per-project doc/chunk
+  counts + recency, backed by the existing `StatusService` aggregation), and
+  unscoped `list_sources` returns that per-project summary instead of dumping
+  every document across projects (a `full` arg keeps the old behavior). The
+  observed failure: 184 sources returned, ~170 of them another project's
+  noise, and the project name only discoverable by reading the dump.
+- **`ping` MCP tool** — cheap liveness probe (OpenSearch reachability with a
+  short timeout) so an agent can check the stack in seconds before committing
+  to an expensive call; doubles as restart verification.
+- **PDF title sanitation** — reject metadata titles that look like filenames
+  (`index.html`) or carry doubled-character runs (`IIDD EEppiicc`, a text-run
+  duplication artifact); fall back to first top heading, then filename stem.
+- **Chunk-neighborhood fetch** — `search_docs` hits expose their chunk
+  `ordinal`; `get_document` takes `around_ordinal` + `radius` to fetch just
+  the section around a hit instead of all-or-nothing whole-document reads.
+- **Idempotent notes** — note ids become deterministic (hash of project +
+  text + anchor, mirroring `ContradictionPair.Id`), so a timeout-and-retry
+  `add_note` upserts instead of double-adding.
+- **Pathless-note guidance** — unanchored project-level notes already work;
+  the `add_note` description must say so (decisions that live above any one
+  doc shouldn't get an arbitrary anchor).
+**Done when:** unscoped `list_sources` answers "what projects exist" in one
+small response; `ping` reports both the up and down cases quickly; a PDF with
+a filename/doubled-run metadata title indexes under a sane title; a search
+hit's section is fetchable via ordinal + radius without pulling the whole
+doc; calling `add_note` twice with identical text yields one note; tests
+cover the new pure logic.
+
+*Delivered:* `list_projects` + `ping` in Mcp (`StatusService` reused for the
+former — no new Core queries; the latter wraps `PingAsync` in a 5s cap with
+an actionable start-the-stack error), summary-first unscoped `list_sources`
+(per-project rollup + note when >1 project; single-project corpora fall
+through to the listing; `full=true` restores the dump),
+`PdfConverter.SanitizeMetadataTitle` (filename/path-shaped and
+doubled-character-run titles rejected → first heading → filename stem — a
+PDF now never titles itself `index.html`), chunk-neighborhood fetch
+(`SearchHit.Ordinal` flows from `_source` through `search_docs` hits;
+`get_document(around_ordinal, radius)` range-filters on the ordinal sort and
+marks the result `partial`), and deterministic note ids
+(`NotesStore.DeterministicId` = SHA-256 of project|anchor|text, 16 hex chars
+mirroring `ContradictionPair.Id` — retried `add_note` upserts; identical
+retry only refreshes `CreatedAt`). `add_note`'s description now names
+unanchored project-level notes as the right choice for doc-transcending
+decisions. Verified live against the real 2-project corpus: unscoped
+`list_sources` answers in a 2-row summary (was the 184-source dump);
+windowed `get_document` on a 61-chunk schema doc returns 3 chunks / 1.0 KB
+vs 37.5 KB full; double `add_note` → one note in `rtfm-notes`; ping up
+(yellow, instant) and down (refused endpoint, fast, actionable) both
+correct; raw-stdio smoke shows 11 tools and pure JSON-RPC stdout. 159/159
+tests.
+
+### Phase 22 — Contradiction lifecycle (first-user feedback, part 2)
+The precision half of the feedback: 15 nominations, ~2 real. Four items:
+- **Template suppression** — chunks whose normalized text appears in 3+
+  documents of a project are template boilerplate by definition (PRD headers,
+  "Document Owners" tables); suppress them as either side of a nomination.
+  Implementation sketch: a `content_hash` keyword field stamped at ingest
+  (hash of the already-computed normalized text) + a cardinality check at
+  detection time. Mapping addition — new field only populates on re-index,
+  acceptable.
+- **Supersession labeling** — pairs already store both `source_modified_at`
+  values (side A = newer); classify at nomination: a large date gap ⇒
+  `kind: "likely-supersession"` ("newer doc disagrees with older — confirm
+  and prefer newer") vs `kind: "contradiction"`. This turns the observed
+  MSP role-vs-flag case from an open investigation into a one-step confirm.
+- **Dismiss / resolve** — `dismiss_contradiction` + `resolve_contradiction`
+  MCP tools (+ CLI). Resolve composes with `NotesStore`: a confirmed pair
+  becomes an override note and the pair is closed. Dismissals must survive
+  re-ingest (pairs are dropped + re-nominated when either doc re-ingests;
+  the deterministic pair id makes a tombstone check reliable) — without
+  this, every dismissed pair resurrects on the next `rtfm index`.
+- **Note-precedence live verification** — the Phase 13 promise (note ranks
+  above / annotates the stale passage) was validated once; re-verify against
+  a real dogfooding note + query, and if a relevant note misses the 0.6 kNN
+  floor for natural question phrasings, tune the floor with evidence.
+- **Explicitly deferred:** opposing-polarity detection (NLI). A third model
+  against the locked "RTFM nominates, the LLM judges" decision (§2.13) —
+  only revisit if template suppression + supersession labeling leave
+  precision unacceptable.
+**Done when:** re-indexing the real corpus produces zero template-boilerplate
+nominations while the planted `admin`/`super-admin` pair survives; a
+date-gapped pair carries the supersession label; a dismissed pair stays
+dismissed across a full re-index; a resolved pair yields exactly one note and
+disappears from open nominations.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

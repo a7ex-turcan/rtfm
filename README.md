@@ -30,7 +30,7 @@ documents leaving your machine.
 ```
 docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
 (.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
- .pdf .xlsx .csv    · index               index          + 7 more (MCP)
+ .pdf .xlsx .csv    · index               index          + 10 more (MCP)
  .drawio .png .jpg
  .sql .rtfmdb)
 ```
@@ -367,12 +367,14 @@ It exposes four tools:
 
 | Tool                                                | Purpose                                                                                                                                                                                                  |
 |-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `search_docs(query, top_k, project?)`               | Ranked passages (hybrid lexical + semantic) with project, source, path, breadcrumb, last-modified date, text                                                                                             |
-| `get_document(path, project?)`                      | One full document as markdown, reassembled from its chunks — for answers that sprawl past a single passage                                                                                               |
-| `list_sources(project?)`                            | Every indexed doc with title, project, date, chunk count — corpus awareness ("do the docs even cover this?")                                                                                             |
+| `search_docs(query, top_k, project?)`               | Ranked passages (hybrid lexical + semantic) with project, source, path, breadcrumb, chunk ordinal, last-modified date, text                                                                              |
+| `get_document(path, project?, around_ordinal?, radius?)` | One document as markdown, reassembled from its chunks — whole, or just the section around a search hit's ordinal                                                                                     |
+| `list_sources(project?, full?)`                     | Indexed docs with title, project, date, chunk count — corpus awareness ("do the docs even cover this?"); unscoped calls across several projects return a per-project summary instead of the full dump    |
+| `list_projects()`                                   | Every indexed project with doc/chunk counts, recency, and vector coverage — find the right `project` value before scoping                                                                                |
+| `ping()`                                            | Fast liveness probe (~5s worst case) — check the stack is up before an expensive call, or verify a restart                                                                                               |
 | `find_similar(path, top_k, project?)`               | Semantically related documents, with the best-matching section as the "why"                                                                                                                              |
 | `list_contradictions(project?, top_k)`              | Nominated doc-vs-doc disagreements within a project (newer vs older side, dates, excerpts) — the agent verifies and surfaces conflicts                                                                   |
-| `add_note(text, project?, path?, author?)`          | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first)                                                                                                    |
+| `add_note(text, project?, path?, author?)`          | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first); omit `path` for project-level decisions; retry-safe (same text = same note)                       |
 | `list_notes(project?)` / `remove_note(id)`          | Review / delete override notes (removal only on explicit user request)                                                                                                                                   |
 | `save_document(title, markdown, project?, author?)` | Persist an LLM-produced analysis/report into the corpus ("remember this via rtfm") — written as a real `.md` under `RTFM_GENERATED_DIR`, indexed immediately, provenance line added, same title replaces |
 

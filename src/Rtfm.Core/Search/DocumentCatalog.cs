@@ -54,10 +54,20 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
         return sources;
     }
 
-    /// <summary>The full reassembled document, or null when no chunks match the path.</summary>
-    public async Task<DocumentContent?> GetDocumentAsync(string path, string? project = null, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The reassembled document, or null when no chunks match the path. With
+    /// <paramref name="aroundOrdinal"/> set, only the chunks within
+    /// <paramref name="radius"/> ordinals of it are fetched (Phase 21 — "the
+    /// section, not the doc"); the result is marked partial.
+    /// </summary>
+    public async Task<DocumentContent?> GetDocumentAsync(
+        string path, string? project = null, int? aroundOrdinal = null, int radius = 2, CancellationToken cancellationToken = default)
     {
-        var chunks = await FetchChunksAsync(path, project, withVectors: false, cancellationToken).ConfigureAwait(false);
+        (int From, int To)? window = aroundOrdinal is { } center
+            ? (Math.Max(0, center - radius), center + radius)
+            : null;
+
+        var chunks = await FetchChunksAsync(path, project, withVectors: false, window, cancellationToken).ConfigureAwait(false);
         if (chunks.Count == 0)
         {
             return null;
@@ -66,7 +76,7 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
         var first = chunks[0];
         var markdown = ReassembleMarkdown(first.Title, chunks.Select(c => (c.HeadingPath, c.Content)).ToList());
 
-        return new DocumentContent(first.SourcePath, first.Title, first.Project, first.SourceModifiedAt, chunks.Count, markdown);
+        return new DocumentContent(first.SourcePath, first.Title, first.Project, first.SourceModifiedAt, chunks.Count, markdown, Partial: window is not null);
     }
 
     /// <summary>
@@ -75,7 +85,7 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
     /// </summary>
     public async Task<SimilarDocsResult?> FindSimilarAsync(string path, int topK = 5, string? project = null, CancellationToken cancellationToken = default)
     {
-        var chunks = await FetchChunksAsync(path, project, withVectors: true, cancellationToken).ConfigureAwait(false);
+        var chunks = await FetchChunksAsync(path, project, withVectors: true, ordinalRange: null, cancellationToken).ConfigureAwait(false);
         if (chunks.Count == 0)
         {
             return null;
@@ -122,17 +132,18 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
         string Project, DateTimeOffset? SourceModifiedAt, float[]? Vector);
 
     /// <summary>Fetches a document's chunks in ordinal order — exact path first, then <c>*/filename</c> fallback.</summary>
-    private async Task<IReadOnlyList<ChunkRow>> FetchChunksAsync(string path, string? project, bool withVectors, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ChunkRow>> FetchChunksAsync(
+        string path, string? project, bool withVectors, (int From, int To)? ordinalRange, CancellationToken cancellationToken)
     {
         var normalized = NormalizeLookupPath(path);
 
-        var rows = await RunChunkQueryAsync(BuildChunksQuery(normalized, exact: true, project, withVectors), withVectors, cancellationToken).ConfigureAwait(false);
+        var rows = await RunChunkQueryAsync(BuildChunksQuery(normalized, exact: true, project, withVectors, ordinalRange), withVectors, cancellationToken).ConfigureAwait(false);
         if (rows.Count > 0)
         {
             return rows;
         }
 
-        return await RunChunkQueryAsync(BuildChunksQuery(LastSegment(normalized), exact: false, project, withVectors), withVectors, cancellationToken).ConfigureAwait(false);
+        return await RunChunkQueryAsync(BuildChunksQuery(LastSegment(normalized), exact: false, project, withVectors, ordinalRange), withVectors, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<ChunkRow>> RunChunkQueryAsync(string body, bool withVectors, CancellationToken cancellationToken)
@@ -279,7 +290,7 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
         return JsonSerializer.Serialize(request);
     }
 
-    internal static string BuildChunksQuery(string pathOrName, bool exact, string? project, bool withVectors)
+    internal static string BuildChunksQuery(string pathOrName, bool exact, string? project, bool withVectors, (int From, int To)? ordinalRange = null)
     {
         object pathClause = exact
             ? new { term = new Dictionary<string, string> { ["source_path"] = pathOrName } }
@@ -289,6 +300,11 @@ public sealed class DocumentCatalog(OpenSearchGateway gateway)
         if (!string.IsNullOrWhiteSpace(project))
         {
             filters.Add(new { term = new Dictionary<string, string> { ["project"] = project } });
+        }
+
+        if (ordinalRange is { } range)
+        {
+            filters.Add(new { range = new Dictionary<string, object> { ["ordinal"] = new { gte = range.From, lte = range.To } } });
         }
 
         var sourceFields = new List<string> { "source_path", "heading_path", "content", "title", "project", "source_modified_at" };

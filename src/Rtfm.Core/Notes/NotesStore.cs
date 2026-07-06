@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Rtfm.Core.Embeddings;
 using Rtfm.Core.OpenSearch;
@@ -37,17 +39,26 @@ public sealed class NotesStore(OpenSearchGateway gateway, ITextEmbedder? embedde
     public Task<bool> EnsureIndexAsync(CancellationToken cancellationToken = default)
         => gateway.EnsureIndexAsync(NotesIndex.Name, NotesIndex.DefinitionJson, cancellationToken);
 
-    /// <summary>Persists a confirmed correction. Returns the stored note (id assigned here).</summary>
+    /// <summary>
+    /// Persists a confirmed correction. Returns the stored note (id assigned
+    /// here). The id is deterministic over (project, text, anchor) — mirroring
+    /// <c>ContradictionPair.Id</c> — so a timed-out-then-retried add upserts
+    /// the same note instead of double-adding (Phase 21); an identical retry
+    /// only refreshes <c>CreatedAt</c>.
+    /// </summary>
     public async Task<Note> AddAsync(
         string text, string project, string? targetPath = null, string? author = null, CancellationToken cancellationToken = default)
     {
         await EnsureIndexAsync(cancellationToken).ConfigureAwait(false);
 
+        var trimmedText = text.Trim();
+        var normalizedTarget = string.IsNullOrWhiteSpace(targetPath) ? null : Indexing.PathNormalizer.Normalize(targetPath);
+
         var note = new Note(
-            Id: Guid.NewGuid().ToString("n")[..8],
+            Id: DeterministicId(project, trimmedText, normalizedTarget),
             Project: project,
-            Text: text.Trim(),
-            TargetPath: string.IsNullOrWhiteSpace(targetPath) ? null : Indexing.PathNormalizer.Normalize(targetPath),
+            Text: trimmedText,
+            TargetPath: normalizedTarget,
             Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author.Trim(),
             CreatedAt: DateTimeOffset.UtcNow);
 
@@ -175,6 +186,10 @@ public sealed class NotesStore(OpenSearchGateway gateway, ITextEmbedder? embedde
         var json = await gateway.SearchAsync(NotesIndex.Name, body, cancellationToken: cancellationToken).ConfigureAwait(false);
         return ParseNotes(json).Notes;
     }
+
+    /// <summary>Same inputs → same id, so re-adding is an upsert. Internal for tests.</summary>
+    internal static string DeterministicId(string project, string text, string? targetPath)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{project}|{targetPath}|{text}")))[..16].ToLowerInvariant();
 
     internal static string BuildSearchQuery(string query, float[]? queryVector, string? project)
     {

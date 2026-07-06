@@ -48,6 +48,24 @@ public class PdfConverterTests
 
         Assert.DoesNotContain("#", result.Markdown);
         Assert.Contains("body text at one size", result.Markdown);
+        // No metadata title, no headings → filename stem (Phase 21), not null.
+        Assert.Equal("flat", result.Title);
+    }
+
+    [Theory]
+    [InlineData("Team Handbook", "Team Handbook")]      // honest title survives
+    [InlineData("  Padded Title ", "Padded Title")]     // trimmed
+    [InlineData("v2.1 Release Notes", "v2.1 Release Notes")] // dot mid-token but spaced text is not a filename
+    [InlineData("index.html", null)]                    // web-to-PDF filename stamp
+    [InlineData("report_final.docx", null)]             // extension-bearing single token
+    [InlineData("C:/exports/cdm.pdf", null)]            // path
+    [InlineData("IIDD  EEppiicc", null)]                // doubled-text-run artifact
+    [InlineData("Bookkeeping fees", "Bookkeeping fees")] // natural doubles stay
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void Metadata_titles_are_sanitized(string? raw, string? expected)
+    {
+        Assert.Equal(expected, PdfConverter.SanitizeMetadataTitle(raw));
     }
 
     [Theory]

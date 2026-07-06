@@ -32,6 +32,7 @@ builder.Services.AddSingleton(sp => new DocumentSearch(
     sp.GetRequiredService<IReranker>(),
     sp.GetRequiredService<Rtfm.Core.Notes.NotesStore>()));
 builder.Services.AddSingleton(sp => new DocumentCatalog(sp.GetRequiredService<OpenSearchGateway>()));
+builder.Services.AddSingleton(sp => new StatusService(sp.GetRequiredService<OpenSearchGateway>()));
 builder.Services.AddSingleton(sp => new Rtfm.Core.Contradictions.ContradictionDetector(sp.GetRequiredService<OpenSearchGateway>()));
 
 // Phase 19 write-back: save_document ingests through the same pipeline the CLI

@@ -29,7 +29,12 @@ public static class NoteTools
         (e.g. "The default user-role for new accounts is super-admin since May 2026; the RBAC
         page still says admin and is outdated."). Pass `path` (from search hits) to anchor the
         note to the document it corrects — anchored notes are shown alongside that document's
-        future search hits.
+        future search hits. OMIT `path` for project-level decisions that live above any single
+        document (architecture choices, cross-cutting conventions): unanchored notes are
+        first-class and still match searches — do not pick an arbitrary anchor.
+
+        Retry-safe: the note id is derived from project + text + path, so re-calling with
+        identical arguments (e.g. after a timeout) updates the same note instead of duplicating.
         """)]
     public static async Task<AddNoteResult> AddNote(
         NotesStore store,

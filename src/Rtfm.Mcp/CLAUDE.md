@@ -35,11 +35,22 @@ framing and the server silently fails to connect.
 ## Tool surface
 
 - `search_docs(query, top_k, project?)` (`SearchDocsTool`) — hybrid retrieval;
-  hits carry both the short `source` filename and the full `path` for chaining.
-- `list_sources(project?)`, `get_document(path, project?)`,
-  `find_similar(path, top_k, project?)` (`CatalogTools`, Phase 8) — all backed
-  by `DocumentCatalog` in Core; path arguments accept full paths or bare
-  filenames (exact-then-wildcard resolution).
+  hits carry the short `source` filename, the full `path`, and the chunk
+  `ordinal` (Phase 21) for chaining.
+- `list_sources(project?, full?)`, `get_document(path, project?,
+  around_ordinal?, radius?)`, `find_similar(path, top_k, project?)`
+  (`CatalogTools`, Phase 8) — all backed by `DocumentCatalog` in Core; path
+  arguments accept full paths or bare filenames (exact-then-wildcard
+  resolution). Phase 21: unscoped `list_sources` across >1 project returns a
+  per-project summary (`full=true` forces the dump); `get_document` with
+  `around_ordinal` fetches just the chunks within `radius` of a hit and marks
+  the result `partial`.
+- `list_projects()` (`CatalogTools`, Phase 21) — project discovery via
+  `StatusService` rollups (doc/chunk counts, recency, vector coverage).
+- `ping()` (`PingTool`, Phase 21) — OpenSearch liveness inside a 5s cap, so
+  an agent can check the stack before an expensive call instead of eating a
+  client-side timeout. Never throws; returns `reachable` + an actionable
+  error.
 - `list_contradictions(project?, top_k)` (`ContradictionTools`, Phase 12) —
   nominated doc-vs-doc disagreements from `ContradictionDetector`; the
   description carries the read-both / prefer-newer / surface-the-conflict
@@ -48,7 +59,9 @@ framing and the server silently fails to connect.
   notes backed by `NotesStore`. The `add_note`/`remove_note` descriptions
   enforce the human-in-the-loop precondition (explicit user confirmation in
   the conversation before calling) — keep that language intact; it is the
-  §2.13 C safety model.
+  §2.13 C safety model. Note ids are deterministic over (project, text,
+  anchor) since Phase 21, so retried adds upsert; unanchored (pathless)
+  notes are first-class for project-level decisions.
 - `save_document(title, markdown, project?, author?)` (`DocumentTools`,
   Phase 19) — agent write-back via `GeneratedDocumentStore`: real file under
   `RTFM_GENERATED_DIR`, ingested through the full pipeline (this is why Mcp DI

@@ -34,8 +34,9 @@ public sealed class PdfConverter
         var headingLevels = AssignHeadingLevels(pages.SelectMany(p => p.Lines), bodySize);
 
         var markdown = RenderMarkdown(pages, bodySize, headingLevels);
-        var title = FirstNonEmpty(document.Information?.Title)
-            ?? FirstTopHeading(pages.SelectMany(p => p.Lines), headingLevels, bodySize);
+        var title = SanitizeMetadataTitle(document.Information?.Title)
+            ?? FirstTopHeading(pages.SelectMany(p => p.Lines), headingLevels, bodySize)
+            ?? Path.GetFileNameWithoutExtension(sourcePath);
 
         return new ConversionResult(
             SourcePath: sourcePath,
@@ -225,8 +226,70 @@ public sealed class PdfConverter
     private static string? FirstTopHeading(IEnumerable<PdfLine> lines, Dictionary<double, int> levels, double bodySize)
         => lines.FirstOrDefault(l => IsHeading(l, bodySize) && levels.TryGetValue(l.FontSize, out var lvl) && lvl == 1)?.Text;
 
-    private static string? FirstNonEmpty(string? value)
-        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    /// <summary>
+    /// PDF metadata titles are untrusted (Phase 21): web-to-PDF tools stamp the
+    /// source filename (<c>index.html</c>), and broken text runs produce
+    /// doubled-character artifacts (<c>IIDD EEppiicc</c>). Reject those so the
+    /// caller falls back to the first heading / filename stem. Internal for tests.
+    /// </summary>
+    internal static string? SanitizeMetadataTitle(string? value)
+    {
+        var title = value?.Trim();
+        if (string.IsNullOrEmpty(title) || LooksLikeFileName(title) || HasDoubledCharacterRuns(title))
+        {
+            return null;
+        }
+
+        return title;
+    }
+
+    /// <summary>A path, URL, or single extension-bearing token — not a human title.</summary>
+    private static bool LooksLikeFileName(string title)
+    {
+        if (title.Contains('/') || title.Contains('\\'))
+        {
+            return true;
+        }
+
+        if (title.Contains(' '))
+        {
+            return false;
+        }
+
+        var dot = title.LastIndexOf('.');
+        if (dot <= 0 || dot == title.Length - 1)
+        {
+            return false;
+        }
+
+        var extension = title[(dot + 1)..];
+        return extension.Length <= 5 && extension.All(char.IsLetterOrDigit);
+    }
+
+    /// <summary>
+    /// Detects the doubled-text-run artifact: nearly every letter appears
+    /// twice in a row (<c>IIDD EEppiicc</c>). Real titles have occasional
+    /// doubles ("book"), never a dominant fraction.
+    /// </summary>
+    private static bool HasDoubledCharacterRuns(string title)
+    {
+        var letters = title.Where(char.IsLetter).ToArray();
+        if (letters.Length < 6)
+        {
+            return false;
+        }
+
+        var doubledPairs = 0;
+        for (var i = 0; i + 1 < letters.Length; i += 2)
+        {
+            if (letters[i] == letters[i + 1])
+            {
+                doubledPairs++;
+            }
+        }
+
+        return doubledPairs * 2 >= letters.Length * 0.7;
+    }
 
     /// <summary>Parses PDF date strings like <c>D:20260702134500+02'00'</c> (tolerant of truncation). Internal for tests.</summary>
     internal static DateTimeOffset? TryParsePdfDate(string? value)

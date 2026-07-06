@@ -20,7 +20,8 @@ public sealed record DocumentContent(
     string Project,
     DateTimeOffset? SourceModifiedAt,
     int ChunkCount,
-    string Markdown);
+    string Markdown,
+    bool Partial = false);
 
 /// <summary>A semantically similar document (Phase 8): best-matching chunk decides the score.</summary>
 public sealed record SimilarDoc(
