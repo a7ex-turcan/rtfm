@@ -15,7 +15,7 @@ internal static class OcrEngine
 {
     private static readonly Lazy<RapidOcr?> Instance = new(Create, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    /// <summary>OCRs a bitmap; null when the engine is unavailable or nothing was read.</summary>
+    /// <summary>OCRs a bitmap; null when the engine is unavailable, OCR fails, or nothing was read.</summary>
     public static string? DetectText(SKBitmap bitmap)
     {
         var ocr = Instance.Value;
@@ -24,8 +24,32 @@ internal static class OcrEngine
             return null;
         }
 
-        var text = ocr.Detect(bitmap, RapidOcrOptions.Default).StrRes?.Trim();
-        return string.IsNullOrWhiteSpace(text) ? null : text;
+        // RapidOcrNet's mean-normalize only accepts Bgra8888 or Gray8, but
+        // SKBitmap.Decode yields the platform-native color type — Bgra8888 on
+        // Windows/Linux, Rgba8888 on macOS. Convert when it isn't acceptable,
+        // else macOS throws on every image.
+        SKBitmap? converted = null;
+        if (bitmap.ColorType is not (SKColorType.Bgra8888 or SKColorType.Gray8))
+        {
+            converted = bitmap.Copy(SKColorType.Bgra8888);
+        }
+
+        try
+        {
+            var text = ocr.Detect(converted ?? bitmap, RapidOcrOptions.Default).StrRes?.Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            // OCR must never sink a document (Phases 16–17): a failure here
+            // just means this image yields no text. The PDF route already
+            // catches per-image; this makes the standalone-image route safe too.
+            return null;
+        }
+        finally
+        {
+            converted?.Dispose();
+        }
     }
 
     private static RapidOcr? Create()

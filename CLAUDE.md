@@ -303,6 +303,13 @@ handful of places an agent will otherwise hardcode OS-specific behavior:
 - **`.mcp.json` uses `dotnet <dll>`, not a native exe** — this is the portable
   choice and runs anywhere `dotnet` is on PATH (§6). Forward slashes in the args
   path are fine; the CLR normalizes them. Don't swap it for a per-OS binary.
+- **OCR bitmap color type is platform-dependent.** `SKBitmap.Decode` returns
+  the platform-native color type — `Bgra8888` on Windows/Linux but `Rgba8888`
+  on macOS — and RapidOcrNet's mean-normalize only accepts `Bgra8888`/`Gray8`,
+  so on macOS every image threw `ArgumentException`. `OcrEngine.DetectText`
+  normalizes to `Bgra8888` before OCR; keep any new OCR entry point on that
+  path. (Caught by the CI macOS leg, invisible on the author's Windows box —
+  the reason the §5 test matrix spans all three OSes.)
 
 ### 2.13 Knowledge recency & contradiction awareness
 Docs evolve and disagree over time (an older page says `user-role = admin`, a

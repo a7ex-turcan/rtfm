@@ -39,6 +39,21 @@ public class ImageConverterTests
     }
 
     [Fact]
+    public void Ocr_reads_an_rgba8888_bitmap_the_shape_macos_decodes_to()
+    {
+        // SKBitmap.Decode yields Rgba8888 on macOS (Bgra8888 on Windows/Linux),
+        // which RapidOcrNet rejected — regression guard for the CI macOS break.
+        // Force Rgba8888 here so the OCR color-type contract holds on every OS.
+        using var decoded = SKBitmap.Decode(DrawLabeledImage("Rgba Channel Order", SKEncodedImageFormat.Png));
+        using var rgba = decoded.Copy(SKColorType.Rgba8888);
+
+        Assert.Equal(SKColorType.Rgba8888, rgba.ColorType);
+        var text = OcrEngine.DetectText(rgba); // must not throw on the non-Bgra input
+        Assert.NotNull(text);
+        Assert.Contains("Rgba", text);
+    }
+
+    [Fact]
     public void Detector_recognizes_png_and_jpeg_magic()
     {
         using var png = new MemoryStream(DrawLabeledImage("x", SKEncodedImageFormat.Png));
