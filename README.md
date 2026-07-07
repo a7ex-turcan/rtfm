@@ -4,6 +4,13 @@
   <img src="assets/rtfm.gif" alt="RTFM — Retrieval Tool For Manuals" width="480">
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-FF8C00" alt="version 1.0.0">
+  <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
+</p>
+
 **R**etrieval **T**ool **F**or **M**anuals — a local, per-developer documentation
 search tool for your LLM.
 
@@ -226,6 +233,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm purge`          | `<project> [--yes]`                                        | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                     |
 | `rtfm convert`        | `<path>`                                                   | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                         |
 | `rtfm chunk`          | `<path>`                                                   | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                           |
+| `rtfm --version`      | `(-v)`                                                     | Prints the installed `rtfm` version.                                                                                                                                                                                                                                                                                                                      |
 
 **Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
 `.pdf`, `.xlsx`, `.csv`, `.drawio`, `.png`/`.jpg`, `.sql`, `.rtfmdb` (live DB

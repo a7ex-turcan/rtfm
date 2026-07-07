@@ -7,6 +7,12 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
     return PrintUsage();
 }
 
+if (args[0] is "--version" or "-v" or "version")
+{
+    Ui.Out.MarkupLine($"[bold]rtfm[/] [{Ui.Accent}]{RtfmVersion.Current}[/]");
+    return 0;
+}
+
 switch (args[0])
 {
     case "init":
@@ -87,7 +93,7 @@ static int PrintUsage()
     }
 
     Ui.Out.WriteLine();
-    Ui.Out.MarkupLine("[bold]R[/]etrieval [bold]T[/]ool [bold]F[/]or [bold]M[/]anuals — [dim]the answer was in the docs all along.[/]");
+    Ui.Out.MarkupLine($"[bold]R[/]etrieval [bold]T[/]ool [bold]F[/]or [bold]M[/]anuals [dim]v{RtfmVersion.Current}[/] — [dim]the answer was in the docs all along.[/]");
     Ui.Out.WriteLine();
 
     var commands = new Table()
@@ -108,6 +114,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");
     commands.AddRow($"[{Ui.Accent}]chunk[/] [dim]<path>[/]", "Convert then show heading-aware chunks (stdout)");
+    commands.AddRow($"[{Ui.Accent}]--version[/] [dim](-v)[/]", "Print the rtfm version");
     Ui.Out.Write(commands);
 
     var env = new Table()
