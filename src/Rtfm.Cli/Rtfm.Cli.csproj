@@ -24,4 +24,16 @@
     <RootNamespace>Rtfm.Cli</RootNamespace>
   </PropertyGroup>
 
+  <!-- Phase 14: ship as a .NET global tool (`dotnet tool install -g Rtfm.Cli`).
+       Version/Authors/Product come from the repo-root Directory.Build.props. -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>rtfm</ToolCommandName>
+    <PackageId>Rtfm.Cli</PackageId>
+    <Description>RTFM — Retrieval Tool For Manuals. Local, per-developer documentation indexer/CLI: convert, chunk, and index docs into OpenSearch for retrieval by an MCP-capable LLM client.</Description>
+    <PackageTags>rtfm;documentation;search;opensearch;mcp;rag;cli</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts\nupkg</PackageOutputPath>
+  </PropertyGroup>
+
 </Project>

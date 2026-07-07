@@ -20,4 +20,17 @@
     <RootNamespace>Rtfm.Mcp</RootNamespace>
   </PropertyGroup>
 
+  <!-- Phase 14: ship the stdio MCP server as a .NET global tool
+       (`dotnet tool install -g Rtfm.Mcp`), so `.mcp.json` can point at the bare
+       `rtfm-mcp` command instead of a repo-relative built DLL. -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>rtfm-mcp</ToolCommandName>
+    <PackageId>Rtfm.Mcp</PackageId>
+    <Description>RTFM stdio MCP server — exposes the RTFM document index (search_docs and friends) to MCP-capable LLM clients such as Claude Code and Claude Desktop.</Description>
+    <PackageTags>rtfm;documentation;search;opensearch;mcp;rag</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)..\..\artifacts\nupkg</PackageOutputPath>
+  </PropertyGroup>
+
 </Project>

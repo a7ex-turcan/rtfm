@@ -905,6 +905,38 @@ earlier if a second user shows up before Phases 8–13 land.
 `docker compose up -d` + `rtfm index`, and wire the MCP server into Claude Code
 from the published artifact alone.
 
+*In progress — .NET tool packaging landed; feed publish + winget/brew still
+open.* Both executables gained `PackAsTool`/`ToolCommandName`
+(`rtfm`/`rtfm-mcp`)/`PackageId` + NuGet metadata; `dotnet pack` bundles the
+full dependency closure — **including the RapidOcrNet models and every
+platform's native runtime (ONNX Runtime, SkiaSharp, SqlClient SNI)** — into the
+RID-agnostic `tools/net10.0/any/` payload, so an installed tool is
+self-contained (only the embedder/reranker models still auto-download, as
+before). The feared model-copy gotcha didn't materialize: the Core `<None
+CopyToOutputDirectory>` items flow into the tool publish output automatically.
+Packaging output goes to `artifacts/nupkg` (gitignored). One trim was needed —
+ONNX Runtime's Android `.aar` + iOS `.xcframework` (~94 MB, unloadable by a
+desktop tool) pushed the nupkg to ~215 MB, near nuget.org's 250 MB ceiling; a
+`PackAsTool`-gated `RtfmTrimMobileRuntimeAssets` target in
+`Directory.Build.props` drops those RIDs from the publish set → **123 MB**.
+Validated end-to-end: isolated `--tool-path` install of `Rtfm.Cli`, then
+`rtfm ping` / `index` / `search` (hybrid + rerank, ONNX loaded from the install
+dir) / `purge` all correct. README gained an "Install as a .NET global tool"
+section (two packages, install both — .NET tools don't chain-install; the bare
+`rtfm-mcp` `.mcp.json` form). **Publish is CI-driven** (`.github/workflows/
+release.yml`): a `v*.*.*` tag reuses ci.yml's cross-OS test matrix
+(`workflow_call`) as a gate, guards that the tag matches
+`Directory.Build.props` `<Version>` (the single source of truth), packs both
+tools, and `dotnet nuget push --skip-duplicate` to nuget.org with the
+`NUGET_API_KEY` repo secret. This sidesteps the local `Rtfm.Mcp` pack's DLL
+lock (the §6 gotcha) entirely — CI has no running server; the lock only bites a
+local `dotnet pack src/Rtfm.Mcp`. Package IDs kept as `Rtfm.Cli` / `Rtfm.Mcp`
+(permanent on nuget.org). **Not yet done:** the first tag hasn't been pushed
+(needs the `NUGET_API_KEY` secret added first); §2.12's `vm.max_map_count` note
+still to fold into the packaged-install story. Version flows from
+`Directory.Build.props` (1.0.0). Winget + a Homebrew tap are **parked** as
+follow-on channels over the same self-contained publish.
+
 ### Phase 15 — draw.io diagrams ✅ **Done** *(built out of order — Phase 14 still open)*
 Diagrams carry knowledge (DB table relations, service topologies) that is
 invisible to text search — but draw.io files are XML *graphs*, not pictures,

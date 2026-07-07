@@ -21,4 +21,21 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
+  <!--
+    Phase 14 packaging: ONNX Runtime ships mobile/web native payloads (an
+    Android .aar and an iOS .xcframework.zip, ~94 MB combined) that a desktop
+    `dotnet tool` can never load. Left in, they push the tool nupkg to ~215 MB —
+    perilously near nuget.org's 250 MB per-package ceiling. Drop those RIDs from
+    the tool's publish output (which is what `PackAsTool` bundles). Gated on
+    PackAsTool so normal builds/`bin` output are untouched.
+  -->
+  <Target Name="RtfmTrimMobileRuntimeAssets"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(PackAsTool)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', 'runtimes[\\/](android|ios|iossimulator|maccatalyst|tvos|tvossimulator|browser)[\\/]'))" />
+    </ItemGroup>
+  </Target>
+
 </Project>

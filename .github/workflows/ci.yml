@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:   # release.yml reuses this test matrix as a publish gate
 
 concurrency:
   group: ci-${{ github.ref }}

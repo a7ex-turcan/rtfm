@@ -1,0 +1,58 @@
+name: Release
+
+# Publishes the two .NET global tools (Rtfm.Cli → `rtfm`, Rtfm.Mcp → `rtfm-mcp`)
+# to nuget.org. Triggered by pushing a version tag, e.g.:
+#
+#     git tag v1.0.0 && git push origin v1.0.0
+#
+# The tag must match <Version> in Directory.Build.props (the single source of
+# truth, per CLAUDE.md §Directory.Build.props). Requires a repo secret
+# NUGET_API_KEY (nuget.org → Account → API Keys; scope "Push", glob `Rtfm.*`).
+on:
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never interrupt a publish mid-flight
+
+permissions:
+  contents: read
+
+jobs:
+  # Reuse the exact cross-OS (Windows/macOS/Linux) test matrix from ci.yml, so
+  # no release ships without green tests on every target OS.
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest   # the tools are RID-agnostic; one pack covers all OSes
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Verify tag matches project version
+        run: |
+          version=$(sed -n 's/.*<Version>\(.*\)<\/Version>.*/\1/p' Directory.Build.props | head -n1)
+          tag="${GITHUB_REF_NAME#v}"
+          echo "Directory.Build.props version: $version"
+          echo "Git tag:                       $tag"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Tag v$tag does not match Directory.Build.props <Version> $version. Bump the version (and the README badge) or retag."
+            exit 1
+          fi
+
+      - name: Pack tools
+        run: |
+          dotnet pack src/Rtfm.Cli -c Release -o "$RUNNER_TEMP/nupkg" -p:ContinuousIntegrationBuild=true
+          dotnet pack src/Rtfm.Mcp -c Release -o "$RUNNER_TEMP/nupkg" -p:ContinuousIntegrationBuild=true
+
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push "$RUNNER_TEMP/nupkg/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --skip-duplicate

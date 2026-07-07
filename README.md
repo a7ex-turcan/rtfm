@@ -96,10 +96,74 @@ dotnet run --project src/Rtfm.Cli -- search "how are roles mapped to functions"
 dotnet run --project src/Rtfm.Cli -- watch ./docs
 ```
 
+## Install as a .NET global tool
+
+RTFM ships as two [.NET global tools](https://learn.microsoft.com/dotnet/core/tools/global-tools):
+`rtfm` (the CLI — package `Rtfm.Cli`) and `rtfm-mcp` (the MCP server — package
+`Rtfm.Mcp`). **Install both** — they're separate packages (.NET tools don't
+chain-install), and you need each: `rtfm` to `init`/`index` your local corpus,
+`rtfm-mcp` for the LLM client to spawn.
+
+```bash
+dotnet tool install -g Rtfm.Cli
+dotnet tool install -g Rtfm.Mcp
+```
+
+That puts both commands on your PATH (via `~/.dotnet/tools`) on every OS — no
+cloning, no manual PATH or `RTFM_HOME` for the binaries. You still need Docker +
+OpenSearch (`rtfm init` bootstraps the container) and the .NET 10 runtime. The
+OCR models and every platform's native runtime (ONNX Runtime, SkiaSharp,
+SqlClient) are bundled inside each package, so an installed tool is
+self-contained — only the embedding/reranker models auto-download on first
+`index`/`search` (~90 MB each, cached per user). Update with `dotnet tool update
+-g Rtfm.Cli`; remove with `dotnet tool uninstall -g Rtfm.Cli` (same for
+`Rtfm.Mcp`).
+
+<details>
+<summary><b>Install from source instead</b> (while iterating on RTFM itself)</summary>
+
+```bash
+dotnet pack src/Rtfm.Cli -c Release
+dotnet pack src/Rtfm.Mcp -c Release       # stop any running rtfm-mcp first — it locks the DLL
+# → artifacts/nupkg/*.nupkg
+dotnet tool install -g Rtfm.Cli --add-source ./artifacts/nupkg
+dotnet tool install -g Rtfm.Mcp --add-source ./artifacts/nupkg
+```
+</details>
+
+**Then bootstrap and use it from anywhere:**
+
+```bash
+rtfm init                       # start OpenSearch + create the index
+rtfm index ~/docs/myproject --project myproject
+rtfm search "something you know is in the docs" --project myproject
+```
+
+With the tools installed, each consuming repo's `.mcp.json` collapses to the
+bare command — no `RTFM_HOME`, no DLL path:
+
+```json
+{
+  "mcpServers": {
+    "rtfm": {
+      "command": "rtfm-mcp",
+      "env": {
+        "RTFM_OPENSEARCH_URL": "http://localhost:9200",
+        "RTFM_PROJECT": "myproject"
+      }
+    }
+  }
+}
+```
+
+The clone-and-build setup below still works and is the path while iterating on
+RTFM itself.
+
 ## Windows local setup
 
-Step-by-step for a fresh machine, until RTFM ships as an installable package
-(Phase 14). Everything below is PowerShell.
+Step-by-step for a fresh machine (clone-and-build; for the packaged install see
+[Install as a .NET global tool](#install-as-a-net-global-tool) above).
+Everything below is PowerShell.
 
 **1. Install prerequisites** (skip what you have):
 
@@ -502,6 +566,29 @@ Notes:
 
 - [`CLAUDE.md`](./CLAUDE.md) — architecture, locked design decisions, tech stack,
   and the phased development plan.
+
+## Releasing
+
+Publishing to [nuget.org](https://www.nuget.org/) is automated
+([`.github/workflows/release.yml`](.github/workflows/release.yml)): pushing a
+`v*.*.*` tag runs the full cross-OS test matrix, then packs and pushes both
+tools. Both `Rtfm.Cli` and `Rtfm.Mcp` version off `<Version>` in
+[`Directory.Build.props`](./Directory.Build.props) — the single source of
+truth — and the pipeline fails loudly if the tag doesn't match it.
+
+One-time setup: add a repo secret **`NUGET_API_KEY`** (nuget.org → Account →
+API Keys; scope *Push*, glob `Rtfm.*`). To cut a release:
+
+```bash
+# 1. Bump <Version> in Directory.Build.props and the version badge in README.md
+# 2. Commit, then tag and push:
+git tag v1.0.0
+git push origin v1.0.0        # → tests → pack → publish to nuget.org
+```
+
+The push uses `--skip-duplicate`, so re-running a tag that's already published
+is a no-op rather than an error. nuget.org package IDs are permanent and
+versions can be unlisted but never overwritten — bump deliberately.
 
 ## License
 
