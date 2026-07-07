@@ -434,9 +434,11 @@ docker compose --profile debug up -d      # → http://localhost:5601
 
 ### Wiring into Claude Code
 
-The MCP server is registered as a project-scoped server via the committed
-[`.mcp.json`](./.mcp.json) at the repo root, so every developer gets it on clone.
-It exposes four tools:
+The MCP server is registered as a project-scoped server via a committed
+[`.mcp.json`](./.mcp.json), so every developer on a repo gets it on clone. With
+the tool installed (above), the config is just the bare `rtfm-mcp` command —
+see [Using RTFM from your other repos](#using-rtfm-from-your-other-repos) for the
+copy-paste template. It exposes thirteen tools:
 
 | Tool                                                | Purpose                                                                                                                                                                                                  |
 |-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -447,6 +449,7 @@ It exposes four tools:
 | `ping()`                                            | Fast liveness probe (~5s worst case) — check the stack is up before an expensive call, or verify a restart                                                                                               |
 | `find_similar(path, top_k, project?)`               | Semantically related documents, with the best-matching section as the "why"                                                                                                                              |
 | `list_contradictions(project?, top_k)`              | Nominated doc-vs-doc disagreements within a project (newer vs older side, dates, excerpts) — the agent verifies and surfaces conflicts                                                                   |
+| `dismiss_contradiction(id)` / `resolve_contradiction(id, note)` | Close a nomination — dismiss it, or resolve it into an override note anchored to the older side (both require explicit user confirmation)                                                    |
 | `add_note(text, project?, path?, author?)`          | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first); omit `path` for project-level decisions; retry-safe (same text = same note)                       |
 | `list_notes(project?)` / `remove_note(id)`          | Review / delete override notes (removal only on explicit user request)                                                                                                                                   |
 | `save_document(title, markdown, project?, author?)` | Persist an LLM-produced analysis/report into the corpus ("remember this via rtfm") — written as a real `.md` under `RTFM_GENERATED_DIR`, indexed immediately, provenance line added, same title replaces |
@@ -455,9 +458,13 @@ Scope for all tools is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or
 pass `project="*"` to search across all projects). Path arguments accept the
 full `path` from other tools' results or a bare filename.
 
-Build in Release first (the config points at the built DLL, not `dotnet run`),
-then use `/mcp` in Claude Code to confirm `rtfm` connected and see its tools.
-Editing `.mcp.json` needs a Claude Code restart to take effect.
+If you installed the tools globally, `.mcp.json` uses `"command": "rtfm-mcp"`
+and needs nothing built. The committed file in *this* repo instead points at the
+built DLL so contributors working from a clone can run the server they're
+editing — for that path, build in Release first (`dotnet run` would emit build
+output onto stdout and corrupt the stdio transport). Either way, use `/mcp` in
+Claude Code to confirm `rtfm` connected and see its tools; editing `.mcp.json`
+needs a Claude Code restart to take effect.
 
 ### Using RTFM from your other repos
 
@@ -465,16 +472,12 @@ RTFM is designed to serve **many codebases at once**: OpenSearch and its index
 are shared, each Claude Code instance spawns its own `rtfm-mcp` process, and the
 per-chunk `project` field keeps corpora from blurring together.
 
-One-time, per machine:
+One-time, per machine — [install the tools](#install-as-a-net-global-tool),
+then index each project's docs under its own name:
 
 ```bash
-# 1. Point RTFM_HOME at your rtfm clone (set it as a persistent user env var)
-#    PowerShell:  [Environment]::SetEnvironmentVariable('RTFM_HOME', 'D:\Projects\rtfm', 'User')
-#    bash/zsh:    export RTFM_HOME=~/src/rtfm   (in your shell profile)
-
-# 2. Index each project's docs under its own project name
-rtfm index D:\docs\payments --project payments
-rtfm index D:\docs\pam      --project pam
+rtfm index ~/docs/payments --project payments
+rtfm index ~/docs/pam      --project pam
 ```
 
 Then drop this `.mcp.json` into each consuming repo — it is the same template
@@ -484,8 +487,7 @@ everywhere; only `RTFM_PROJECT` changes:
 {
   "mcpServers": {
     "rtfm": {
-      "command": "dotnet",
-      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/rtfm-mcp.dll"],
+      "command": "rtfm-mcp",
       "env": {
         "RTFM_OPENSEARCH_URL": "http://localhost:9200",
         "RTFM_PROJECT": "payments"
@@ -497,10 +499,9 @@ everywhere; only `RTFM_PROJECT` changes:
 
 Notes:
 
-- Claude Code expands `${RTFM_HOME:-.}` at launch; the `.-` fallback makes the
-  same file work inside the rtfm repo itself (where the path is relative to the
-  repo root). Committing this file is safe — each dev supplies their own
-  `RTFM_HOME`.
+- `rtfm-mcp` resolves off your PATH (the `dotnet tool` shim in `~/.dotnet/tools`),
+  so the template is identical on every machine and repo — no per-dev paths to
+  commit. Committing this file is safe.
 - Claude Code prompts for approval the first time each repo uses the server —
   expected, not a bug.
 - Sessions auto-scope to their repo's `RTFM_PROJECT`; the agent can still pass
@@ -510,34 +511,58 @@ Notes:
   for your user across all repos — but then there's no per-repo scoping; you
   trade the committed template for "all projects unless the agent filters".
 - Each running instance loads its own embedding model (~100–200 MB RAM) on
-  first search, and holds a lock on the built DLL — disconnect instances (or
-  restart Claude Code) before rebuilding rtfm.
+  first search.
+
+<details>
+<summary><b>Running the MCP server from a clone instead</b> (contributors editing RTFM)</summary>
+
+If you didn't install the tool and want Claude Code to run the server *you're
+building*, point at the built DLL via a per-dev `RTFM_HOME`:
+
+```jsonc
+{
+  "mcpServers": {
+    "rtfm": {
+      "command": "dotnet",
+      "args": ["${RTFM_HOME:-.}/src/Rtfm.Mcp/bin/Release/net10.0/rtfm-mcp.dll"],
+      "env": { "RTFM_OPENSEARCH_URL": "http://localhost:9200", "RTFM_PROJECT": "payments" }
+    }
+  }
+}
+```
+
+Set `RTFM_HOME` to your clone (PowerShell:
+`[Environment]::SetEnvironmentVariable('RTFM_HOME', 'D:\Projects\rtfm', 'User')`;
+bash/zsh: `export RTFM_HOME=~/src/rtfm`). Claude Code expands `${RTFM_HOME:-.}`
+at launch, and the `.-` fallback makes the same file work inside the rtfm repo
+itself. Build in Release first, and note a running server holds a lock on the
+built DLL — disconnect instances before rebuilding.
+</details>
 
 ### Using RTFM from Claude Desktop
 
 Claude Desktop shares the same index, notes, and generated documents — a
 document you saved from a Claude Code session is retrievable from a Desktop
-chat. The wiring differs from Claude Code in three ways: Desktop has its own
-config file, it does **not** expand `${VAR}` placeholders (use absolute
-paths), and it doesn't read your shell profile (so don't rely on PATH or
-`RTFM_HOME` there).
+chat. Two wiring differences from Claude Code: Desktop has its own config file,
+and it's **GUI-launched, so it doesn't read your shell profile** — a bare
+`rtfm-mcp` may not be on its PATH (especially a Dock-launched app on macOS). The
+robust choice is the **absolute path to the installed tool shim**:
 
 Edit the config (Settings → Developer → Edit Config, or open it directly):
 
-| OS      | Config file                                                       |
-|---------|-------------------------------------------------------------------|
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json`                     |
-| macOS   | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| OS      | Config file                                                       | Tool shim (`command`)                          |
+|---------|-------------------------------------------------------------------|------------------------------------------------|
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json`                     | `%USERPROFILE%\.dotnet\tools\rtfm-mcp.exe`      |
+| macOS   | `~/Library/Application Support/Claude/claude_desktop_config.json` | `~/.dotnet/tools/rtfm-mcp` (expand `~` to a full path) |
 
-Add an `mcpServers` block (keep whatever else is in the file), with the
-**absolute** path to your built DLL:
+Add an `mcpServers` block (keep whatever else is in the file), with the absolute
+shim path as `command`:
 
 ```json
 {
   "mcpServers": {
     "rtfm": {
-      "command": "dotnet",
-      "args": ["D:\\Projects\\rtfm\\src\\Rtfm.Mcp\\bin\\Release\\net10.0\\rtfm-mcp.dll"],
+      "command": "C:\\Users\\you\\.dotnet\\tools\\rtfm-mcp.exe",
       "env": {
         "RTFM_OPENSEARCH_URL": "http://localhost:9200"
       }
@@ -546,9 +571,11 @@ Add an `mcpServers` block (keep whatever else is in the file), with the
 }
 ```
 
-(macOS: `"args": ["/Users/you/src/rtfm/src/Rtfm.Mcp/bin/Release/net10.0/rtfm-mcp.dll"]`.
-If `dotnet` isn't found when launched from the Dock, use its absolute path
-too, e.g. `/usr/local/share/dotnet/dotnet`.)
+(macOS: `"command": "/Users/you/.dotnet/tools/rtfm-mcp"`. If you didn't install
+the tool and want to run from a clone, use the built DLL instead:
+`"command": "dotnet", "args": ["/absolute/path/to/rtfm-mcp.dll"]` — and an
+absolute `dotnet` too if the Dock launch can't find it, e.g.
+`/usr/local/share/dotnet/dotnet`.)
 
 Notes:
 
@@ -559,8 +586,6 @@ Notes:
   (= search all projects, every hit attributed) is the sensible default. Add
   `"RTFM_PROJECT": "yourproject"` to the `env` block to pin it.
 - OpenSearch must be running (`rtfm init`, or Docker Desktop autostart).
-- A running Desktop session holds the same DLL lock as any other instance —
-  quit it before rebuilding rtfm.
 
 ## Documentation
 
