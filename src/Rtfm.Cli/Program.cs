@@ -103,7 +103,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder> [[--project <name>]][/]", "Watch a folder and keep the index fresh (Ctrl+C to stop)");
     commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
     commands.AddRow($"[{Ui.Accent}]status[/] [dim][[--project <name>]] [[--stale <days>]][/]", "Index health: projects, counts, vector coverage, staleness");
-    commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project <name>]][/]", "Nominated doc-vs-doc disagreements within a project");
+    commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project]] [[--closed]] | dismiss <id> | resolve <id> --note <text>[/]", "Doc-vs-doc disagreements: list, dismiss, or resolve into an override note");
     commands.AddRow($"[{Ui.Accent}]note[/] [dim]add <text>|list|rm <id> [[--project]] [[--doc <path>]][/]", "Override notes: corrections that survive re-indexing");
     commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");

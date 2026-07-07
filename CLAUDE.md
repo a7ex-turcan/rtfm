@@ -261,17 +261,20 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-The tool surface is now eleven tools: `search_docs` (hits carry chunk
+The tool surface is now thirteen tools: `search_docs` (hits carry chunk
 `ordinal` since Phase 21); the Phase 8 additions —
 `get_document(path, project?, around_ordinal?, radius?)` (full reassembled
 page, or just the section around a hit), `list_sources(project?, full?)`
 (corpus awareness; unscoped calls summarize per project),
 `find_similar(path, top_k?, project?)` (related docs via chunk-vector
-centroid); `list_contradictions(project?, top_k?)` (Phase 12 nominations);
-the Phase 13 correction tools — `add_note` (human-confirmed only; retry-safe
-deterministic ids), `list_notes`, `remove_note`; `save_document` (Phase 19
-write-back); and the Phase 21 additions — `list_projects` (project
-discovery) and `ping` (fast liveness probe).
+centroid); `list_contradictions(project?, top_k?, include_closed?)` (Phase 12
+nominations, Phase 22 kind/status); the Phase 13 correction tools —
+`add_note` (human-confirmed only; retry-safe deterministic ids), `list_notes`,
+`remove_note`; `save_document` (Phase 19 write-back); the Phase 21 additions —
+`list_projects` (project discovery) and `ping` (fast liveness probe); and the
+Phase 22 lifecycle verdicts — `dismiss_contradiction` and
+`resolve_contradiction` (both human-confirmed only; resolve records the
+correction as an override note anchored to the older side).
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -1127,7 +1130,7 @@ vs 37.5 KB full; double `add_note` → one note in `rtfm-notes`; ping up
 correct; raw-stdio smoke shows 11 tools and pure JSON-RPC stdout. 159/159
 tests.
 
-### Phase 22 — Contradiction lifecycle (first-user feedback, part 2)
+### Phase 22 — Contradiction lifecycle (first-user feedback, part 2) ✅ **Done**
 The precision half of the feedback: 15 nominations, ~2 real. Four items:
 - **Template suppression** — chunks whose normalized text appears in 3+
   documents of a project are template boilerplate by definition (PRD headers,
@@ -1160,6 +1163,47 @@ nominations while the planted `admin`/`super-admin` pair survives; a
 date-gapped pair carries the supersession label; a dismissed pair stays
 dismissed across a full re-index; a resolved pair yields exactly one note and
 disappears from open nominations.
+
+*Delivered:* **Template suppression is two-granularity** — the planned
+chunk-level `content_hash` (stamped at ingest; nominations dropped when either
+side's hash spans ≥3 docs, one aggregation per doc-batch) *plus* a line-level
+pass the real corpus forced: the surviving noise was template **variants** —
+the same "Document Owners"/"PRD Approval" tables in 3 docs, each copy differing
+by a few characters ("Pod Owner" vs "Pod Ow"), invisible to exact whole-chunk
+hashing (measured trigram Jaccard 0.655 — no near-dup threshold separates this
+from real content either). So chunks also carry `line_hashes` (normalized
+lines ≥16 chars, deduped), and a nomination is suppressed when ≥3 of the lines
+its two sides share verbatim span ≥3 docs *and* those are the majority of
+everything shared — the planted pair shares zero lines, so it survives by
+construction, and 2-doc copies (supersession material) stay eligible. Both
+fields ride `RtfmIndex.MappingAdditionsJson`, PUT idempotently by
+`EnsureIndexAsync` onto pre-existing indexes (new `PutMappingAsync` /
+`UpdateAsync` gateway ops); hashes populate on re-index, so the *first*
+re-index after upgrading suppresses only partially — the second has full
+coverage. Real-corpus result: 76 open pairs → 64, a scripted sweep of every
+survivor found **zero** template violations at either granularity, and
+isos-admin's remainder is exactly the real content (the MSP role-vs-flag
+disagreement the dogfooding session flagged). kabuk's residue is recurring
+meeting-notes near-dups — a *different* noise mode (series, not boilerplate),
+left for the LLM judge. **Supersession labeling:** `kind` stamped at
+nomination (30-day gap ⇒ `likely-supersession`); the real corpus yields none
+(exports share mtimes) — validated with a planted 5-month pair. **Lifecycle:**
+`status`/`resolved_note_id`/`status_changed_at` on pairs; `rtfm contradictions
+[--closed] | dismiss <id> | resolve <id> --note <text>` and the
+`dismiss_contradiction`/`resolve_contradiction` MCP tools (descriptions
+enforce explicit user confirmation, mirroring `add_note`). Re-ingest now drops
+only **open** pairs (closed ones are tombstones; their deterministic ids also
+block re-nomination — verified: a dismissed and a resolved pair both survive
+full re-indexes), document deletion still drops everything, purge drops the
+project's pairs and notes. Resolve composes with `NotesStore`: one note,
+anchored to the older side. **Note-precedence re-verification** found the
+promised failure: a real dogfooding note scored 0.46–0.58 against natural
+phrasings of its own topic (missing the 0.6 kNN floor; it only reached the
+user as an anchored annotation), while irrelevant notes clustered at
+0.33–0.37 — `NotesStore.MinSearchScore` lowered to **0.45** on that evidence,
+after which the note ranks #1 as an attributed override and unrelated queries
+stay note-free. MCP smoke: 13 tools, stdout pure JSON-RPC, closed pairs carry
+kind/status over the wire. 168/168 tests.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

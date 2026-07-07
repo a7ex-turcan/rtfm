@@ -92,11 +92,14 @@ public sealed class DocumentIngestor
 
         var count = await _indexer.IndexDocumentAsync(chunks, indexedAt, vectors, cancellationToken).ConfigureAwait(false);
 
-        // Contradiction pass (§2.13, Phase 12): drop pairs referencing the old
-        // version of this doc, then re-evaluate from the fresh chunks.
+        // Contradiction pass (§2.13, Phase 12): drop OPEN pairs referencing the
+        // old version of this doc, then re-evaluate from the fresh chunks.
+        // Dismissed/resolved pairs are preserved (Phase 22) — their
+        // deterministic ids also stop re-nomination, so a human verdict
+        // survives every re-index.
         if (_detector is not null)
         {
-            await _detector.RemoveForPathAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+            await _detector.RemoveForPathAsync(sourcePath, onlyOpen: true, cancellationToken).ConfigureAwait(false);
             await _detector.DetectForDocumentAsync(chunks, vectors, indexedAt, cancellationToken).ConfigureAwait(false);
         }
 
@@ -111,6 +114,7 @@ public sealed class DocumentIngestor
         await RemovePairsAsync(normalized, cancellationToken).ConfigureAwait(false);
     }
 
+    // Document gone → every pair referencing it is meaningless, closed or not.
     private Task RemovePairsAsync(string normalizedPath, CancellationToken cancellationToken)
-        => _detector?.RemoveForPathAsync(normalizedPath, cancellationToken) ?? Task.CompletedTask;
+        => _detector?.RemoveForPathAsync(normalizedPath, onlyOpen: false, cancellationToken) ?? Task.CompletedTask;
 }

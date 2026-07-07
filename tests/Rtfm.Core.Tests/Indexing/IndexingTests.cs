@@ -17,6 +17,14 @@ public class IndexingTests
         Assert.Equal("date", props.GetProperty("source_modified_at").GetProperty("type").GetString());
         Assert.Equal("date", props.GetProperty("indexed_at").GetProperty("type").GetString());
         Assert.Equal("knn_vector", props.GetProperty("content_vector").GetProperty("type").GetString());
+        Assert.Equal("keyword", props.GetProperty("content_hash").GetProperty("type").GetString());
+        Assert.Equal("keyword", props.GetProperty("line_hashes").GetProperty("type").GetString());
+
+        // The additions snippet (PUT _mapping onto pre-Phase-22 indexes) must
+        // agree with the create-time definition.
+        using var additions = JsonDocument.Parse(RtfmIndex.MappingAdditionsJson);
+        Assert.Equal("keyword", additions.RootElement.GetProperty("properties").GetProperty("content_hash").GetProperty("type").GetString());
+        Assert.Equal("keyword", additions.RootElement.GetProperty("properties").GetProperty("line_hashes").GetProperty("type").GetString());
 
         var analyzers = doc.RootElement.GetProperty("settings").GetProperty("analysis").GetProperty("analyzer");
         Assert.True(analyzers.TryGetProperty("rtfm_technical", out _));
@@ -49,6 +57,9 @@ public class IndexingTests
             Assert.Equal("A > B\n\nbody one", root.GetProperty("content").GetString());
             Assert.True(root.TryGetProperty("source_modified_at", out _));
             Assert.True(root.TryGetProperty("indexed_at", out _));
+            // Phase 22: fingerprints of the normalized body text, for template counting.
+            Assert.Equal(Core.Contradictions.ContradictionDetector.ContentHash("body one"), root.GetProperty("content_hash").GetString());
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("line_hashes").ValueKind);
         }
 
         // Null title/date are omitted (WhenWritingNull), not written as null.

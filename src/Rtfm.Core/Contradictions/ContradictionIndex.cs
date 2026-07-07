@@ -16,20 +16,41 @@ public static class ContradictionIndex
         {
           "mappings": {
             "properties": {
-              "project":       { "type": "keyword" },
-              "similarity":    { "type": "float" },
-              "detected_at":   { "type": "date" },
-              "a_path":        { "type": "keyword" },
-              "a_ordinal":     { "type": "integer" },
-              "a_heading":     { "type": "keyword", "ignore_above": 1024 },
-              "a_modified_at": { "type": "date" },
-              "a_excerpt":     { "type": "text", "index": false },
-              "b_path":        { "type": "keyword" },
-              "b_ordinal":     { "type": "integer" },
-              "b_heading":     { "type": "keyword", "ignore_above": 1024 },
-              "b_modified_at": { "type": "date" },
-              "b_excerpt":     { "type": "text", "index": false }
+              "project":           { "type": "keyword" },
+              "similarity":        { "type": "float" },
+              "detected_at":       { "type": "date" },
+              "kind":              { "type": "keyword" },
+              "status":            { "type": "keyword" },
+              "resolved_note_id":  { "type": "keyword" },
+              "status_changed_at": { "type": "date" },
+              "a_path":            { "type": "keyword" },
+              "a_ordinal":         { "type": "integer" },
+              "a_heading":         { "type": "keyword", "ignore_above": 1024 },
+              "a_modified_at":     { "type": "date" },
+              "a_excerpt":         { "type": "text", "index": false },
+              "b_path":            { "type": "keyword" },
+              "b_ordinal":         { "type": "integer" },
+              "b_heading":         { "type": "keyword", "ignore_above": 1024 },
+              "b_modified_at":     { "type": "date" },
+              "b_excerpt":         { "type": "text", "index": false }
             }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// The Phase 22 lifecycle fields, for PUT <c>_mapping</c> onto side indexes
+    /// created before this phase (idempotent). Docs written earlier simply lack
+    /// the fields — absence reads as kind "contradiction" / status "open".
+    /// </summary>
+    public const string MappingAdditionsJson =
+        """
+        {
+          "properties": {
+            "kind":              { "type": "keyword" },
+            "status":            { "type": "keyword" },
+            "resolved_note_id":  { "type": "keyword" },
+            "status_changed_at": { "type": "date" }
           }
         }
         """;

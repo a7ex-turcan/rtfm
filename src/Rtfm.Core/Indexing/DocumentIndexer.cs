@@ -18,11 +18,18 @@ public sealed class DocumentIndexer(OpenSearchGateway gateway)
 
     /// <summary>
     /// Creates the index with the RTFM mapping if it is missing, and (re)puts the
-    /// hybrid search pipeline (idempotent). Returns true if the index was created.
+    /// hybrid search pipeline (idempotent). On a pre-existing index, PUTs the
+    /// post-Phase-3 field additions into the mapping (idempotent — see
+    /// <see cref="RtfmIndex.MappingAdditionsJson"/>). Returns true if created.
     /// </summary>
     public async Task<bool> EnsureIndexAsync(CancellationToken cancellationToken = default)
     {
         var created = await gateway.EnsureIndexAsync(RtfmIndex.Name, RtfmIndex.DefinitionJson, cancellationToken).ConfigureAwait(false);
+        if (!created)
+        {
+            await gateway.PutMappingAsync(RtfmIndex.Name, RtfmIndex.MappingAdditionsJson, cancellationToken).ConfigureAwait(false);
+        }
+
         await gateway.PutSearchPipelineAsync(RtfmIndex.HybridPipelineName, RtfmIndex.HybridPipelineJson, cancellationToken).ConfigureAwait(false);
         return created;
     }
@@ -85,6 +92,12 @@ public sealed class DocumentIndexer(OpenSearchGateway gateway)
                 title = chunk.DocumentTitle,
                 heading_path = chunk.HeadingPath,
                 content = chunk.ContentWithBreadcrumb,
+                // Fingerprints of the normalized body text (Phase 22): let the
+                // contradiction detector count how many docs share this exact
+                // text (template boilerplate) — whole-chunk and per-line, the
+                // latter for template variants — in one aggregation each.
+                content_hash = Contradictions.ContradictionDetector.ContentHash(chunk.Text),
+                line_hashes = Contradictions.ContradictionDetector.LineHashes(chunk.Text),
                 source_modified_at = chunk.SourceModifiedAt?.ToUniversalTime(),
                 indexed_at = indexedAt.ToUniversalTime(),
                 content_vector = vectors?[i],

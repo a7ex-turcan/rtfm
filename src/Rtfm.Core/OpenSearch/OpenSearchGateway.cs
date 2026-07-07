@@ -166,6 +166,31 @@ public sealed class OpenSearchGateway
         return response.Body;
     }
 
+    /// <summary>
+    /// Adds fields to an existing index's mapping (idempotent for identical
+    /// definitions; new fields on old indexes — e.g. Phase 22's
+    /// <c>content_hash</c> — without a reindex). Body is
+    /// <c>{"properties": {...}}</c>.
+    /// </summary>
+    public async Task PutMappingAsync(string index, string propertiesJson, CancellationToken cancellationToken = default)
+    {
+        var response = await _client.Indices
+            .PutMappingAsync<StringResponse>(index, PostData.String(propertiesJson), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"put mapping on '{index}'");
+    }
+
+    /// <summary>Partial-updates one document (<c>_update</c> with a <c>doc</c> body). Throws when the id does not exist.</summary>
+    public async Task UpdateAsync(string index, string id, string partialDocJson, CancellationToken cancellationToken = default)
+    {
+        var response = await _client
+            .UpdateAsync<StringResponse>(index, id, PostData.String($"{{\"doc\":{partialDocJson}}}"), ctx: cancellationToken)
+            .ConfigureAwait(false);
+
+        EnsureSuccess(response, $"update {index}/{id}");
+    }
+
     /// <summary>Creates or replaces a search pipeline (idempotent PUT).</summary>
     public async Task PutSearchPipelineAsync(string name, string definitionJson, CancellationToken cancellationToken = default)
     {

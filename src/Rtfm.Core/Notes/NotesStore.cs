@@ -29,10 +29,14 @@ public sealed class NotesStore(OpenSearchGateway gateway, ITextEmbedder? embedde
     /// kNN score floor for query→note matching. Deliberately looser than
     /// contradiction detection's 0.75: that compares statement-to-statement
     /// (near-paraphrases), this compares *question*-to-statement, which runs
-    /// structurally lower (a relevant note scored 0.67 in live validation).
-    /// 0.6 ≈ cosine 0.67 — topically related; the reranker judges from there.
+    /// structurally lower — and drops further as notes grow multi-sentence.
+    /// Phase 22 evidence against real dogfooding notes: natural phrasings of
+    /// a long note's own topic scored 0.46–0.58 (missing the original 0.6
+    /// floor), while *irrelevant* notes clustered at 0.33–0.37. 0.45 sits in
+    /// the separation band; the floor only keeps unrelated notes out of the
+    /// candidate pool — the reranker judges relevance from there.
     /// </summary>
-    internal const double MinSearchScore = 0.6;
+    internal const double MinSearchScore = 0.45;
 
     private const int MaxNoteCandidates = 5;
 

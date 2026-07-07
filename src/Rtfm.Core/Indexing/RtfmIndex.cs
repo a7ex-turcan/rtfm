@@ -85,11 +85,30 @@ public static class RtfmIndex
               "heading_path":       { "type": "text", "analyzer": "rtfm_technical",
                                       "fields": { "keyword": { "type": "keyword", "ignore_above": 1024 } } },
               "content":            { "type": "text", "analyzer": "rtfm_technical" },
+              "content_hash":       { "type": "keyword" },
+              "line_hashes":        { "type": "keyword" },
               "source_modified_at": { "type": "date" },
               "indexed_at":         { "type": "date" },
               "content_vector":     { "type": "knn_vector", "dimension": {{VectorDimension}},
                                       "method": { "name": "hnsw", "space_type": "l2", "engine": "lucene" } }
             }
+          }
+        }
+        """;
+
+    /// <summary>
+    /// Post-Phase-3 field additions, for PUT <c>_mapping</c> onto indexes
+    /// created before them (idempotent — PUT of an identical definition is a
+    /// no-op). Chunks written earlier simply lack the fields until the next
+    /// re-index; <c>content_hash</c> (Phase 22 template counting) tolerates
+    /// that — an absent hash never matches a template aggregation.
+    /// </summary>
+    public const string MappingAdditionsJson =
+        """
+        {
+          "properties": {
+            "content_hash": { "type": "keyword" },
+            "line_hashes":  { "type": "keyword" }
           }
         }
         """;
