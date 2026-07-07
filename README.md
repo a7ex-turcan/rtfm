@@ -5,6 +5,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <img src="https://img.shields.io/badge/version-1.0.0-FF8C00" alt="version 1.0.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
