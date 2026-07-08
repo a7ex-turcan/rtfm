@@ -945,12 +945,12 @@ tools, and `dotnet nuget push --skip-duplicate` to nuget.org with the
 `NUGET_API_KEY` repo secret. This sidesteps the local `Rtfm.Mcp` pack's DLL
 lock (the §6 gotcha) entirely — CI has no running server; the lock only bites a
 local `dotnet pack src/Rtfm.Mcp`. Package IDs kept as `Rtfm.Cli` / `Rtfm.Mcp`
-(permanent on nuget.org). **Open:** the `NUGET_API_KEY` secret must exist on the
-repo for a tag push to publish (the first `v1.1.0` release depends on it);
-§2.12's `vm.max_map_count` note still to fold into the packaged-install story.
-Version flows from `Directory.Build.props` (1.1.0 — the Jira bare-HTML route,
-§2.5). Winget + a Homebrew tap are **parked** as follow-on channels over the
-same self-contained publish.
+(permanent on nuget.org). The `NUGET_API_KEY` repo secret **is configured**, so
+a matching tag push publishes — `v1.1.0` (the Jira bare-HTML route, §2.5) is the
+first real release. **Open:** §2.12's `vm.max_map_count` note still to fold into
+the packaged-install story. Version flows from `Directory.Build.props` (1.1.0).
+Winget + a Homebrew tap are **parked** as follow-on channels over the same
+self-contained publish.
 
 ### Phase 15 — draw.io diagrams ✅ **Done** *(built out of order — Phase 14 still open)*
 Diagrams carry knowledge (DB table relations, service topologies) that is
