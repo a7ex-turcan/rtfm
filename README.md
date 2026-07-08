@@ -109,9 +109,23 @@ dotnet tool install -g Rtfm.Cli
 dotnet tool install -g Rtfm.Mcp
 ```
 
-That puts both commands on your PATH (via `~/.dotnet/tools`) on every OS — no
-cloning, no manual PATH or `RTFM_HOME` for the binaries. You still need Docker +
-OpenSearch (`rtfm init` bootstraps the container) and the .NET 10 runtime. The
+Both commands install to the .NET global-tools directory (`~/.dotnet/tools`, or
+`%USERPROFILE%\.dotnet\tools` on Windows) — no cloning, no manual `RTFM_HOME`.
+
+> **Make sure that directory is on your PATH.** On **Windows** the .NET SDK
+> installer adds it automatically (open a fresh terminal after installing).
+> On **macOS/Linux** it often isn't — `dotnet tool install` prints a warning
+> when it's missing; add it once to your shell profile and re-open the shell:
+>
+> ```bash
+> echo 'export PATH="$PATH:$HOME/.dotnet/tools"' >> ~/.zshrc   # or ~/.bashrc
+> ```
+>
+> (GUI-launched apps like Claude Desktop don't read your shell profile — see
+> [that section](#using-rtfm-from-claude-desktop) for the absolute-path form.)
+
+You still need Docker + OpenSearch (`rtfm init` bootstraps the container) and the
+.NET 10 runtime. The
 OCR models and every platform's native runtime (ONNX Runtime, SkiaSharp,
 SqlClient) are bundled inside each package, so an installed tool is
 self-contained — only the embedding/reranker models auto-download on first
