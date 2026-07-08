@@ -63,6 +63,26 @@ public class FormatDetectorTests
     }
 
     [Fact]
+    public void Detects_bare_html_by_content_over_doc_extension()
+    {
+        // Jira's "Export to Word" is a .doc that is really bare HTML — no MIME
+        // wrapper, so it must not be mistaken for MHTML or fall through to Unknown.
+        var html = "<!DOCTYPE html>\n<html><head><title>[#AEXP-130] Foo</title></head>"
+            + "<body><p>hi</p></body></html>";
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes(html));
+
+        Assert.Equal(SourceFormat.Html, FormatDetector.Detect("AEXP-130.doc", stream));
+        Assert.Equal(0, stream.Position); // stream restored for the converter
+    }
+
+    [Fact]
+    public void Detects_html_by_extension_when_content_lacks_doctype()
+    {
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes("<body>fragment</body>"));
+        Assert.Equal(SourceFormat.Html, FormatDetector.Detect("page.htm", stream));
+    }
+
+    [Fact]
     public void Returns_unknown_for_unrecognized_content()
     {
         using var stream = new MemoryStream(Encoding.ASCII.GetBytes("plain text, no clues"));

@@ -2,12 +2,13 @@ namespace Rtfm.Core.Conversion;
 
 /// <summary>
 /// Front door for conversion: detect the format (§2.5) and dispatch to the
-/// matching converter. Live routes: MHTML (1a), docx (1b), markdown
-/// passthrough (1c), and the Phase 9 additions — PDF, xlsx, CSV.
+/// matching converter. Live routes: MHTML (1a), bare HTML (Jira exports), docx
+/// (1b), markdown passthrough (1c), and the Phase 9 additions — PDF, xlsx, CSV.
 /// </summary>
 public sealed class DocumentConverter
 {
     private readonly MhtmlConverter _mhtml = new();
+    private readonly HtmlConverter _html = new();
     private readonly DocxConverter _docx = new();
     private readonly MarkdownConverter _markdown = new();
     private readonly PdfConverter _pdf = new();
@@ -36,6 +37,7 @@ public sealed class DocumentConverter
         return format switch
         {
             SourceFormat.Mhtml => _mhtml.Convert(stream, path),
+            SourceFormat.Html => _html.Convert(stream, path),
             SourceFormat.Docx => _docx.Convert(stream, path),
             SourceFormat.Markdown => _markdown.Convert(stream, path),
             SourceFormat.Pdf => _pdf.Convert(stream, path),

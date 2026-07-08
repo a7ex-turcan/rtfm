@@ -131,10 +131,24 @@ front ends into the same tail):
 2. **`.docx`** — genuine Word / Open XML. Ship second.
 3. **`.md`** — plain Markdown. Ship third; near-trivial passthrough.
 
+> **The `.doc` extension lies two different ways.** Confluence's "Export to
+> Word" is MHTML (above); **Jira's "Export to Word" is *bare* HTML** — a plain
+> `<!DOCTYPE html>` document (with an `application/vnd.ms-word` meta tag) and
+> **no** MIME wrapper. Same `.doc` extension, different container, so they route
+> to different front ends. The bare-HTML route (`HtmlConverter`) reuses the
+> shared strip→ReverseMarkdown tail; it also recovers the two things the tail
+> can't see once `<head>` is stripped — the `<title>` (Jira issues carry no
+> `<h1>`) and the Jira `Updated:` byline, used as `source_modified_at` (§2.13 A,
+> the "Confluence last modified byline" analog). `.html`/`.htm` files ride the
+> same route.
+
 **Route by sniffing content, not just the extension** — the sample files prove
-the extension lies (a `.doc` that is really MHTML). Detection order:
+the extension lies (a `.doc` that is really MHTML, or really bare HTML).
+Detection order (content first; MHTML *before* HTML, since MHTML also wraps
+HTML):
 - zip magic `PK\x03\x04` → **docx**
 - MIME headers (`MIME-Version:` / `multipart/related`) → **MHTML**
+- `<!doctype html>` / `<html>` (or `.html`/`.htm` extension) → **bare HTML**
 - otherwise, `.md` extension → **markdown passthrough**
 
 **Per-format front end, shared back end.** Each route produces HTML (markdown
@@ -931,11 +945,12 @@ tools, and `dotnet nuget push --skip-duplicate` to nuget.org with the
 `NUGET_API_KEY` repo secret. This sidesteps the local `Rtfm.Mcp` pack's DLL
 lock (the §6 gotcha) entirely — CI has no running server; the lock only bites a
 local `dotnet pack src/Rtfm.Mcp`. Package IDs kept as `Rtfm.Cli` / `Rtfm.Mcp`
-(permanent on nuget.org). **Not yet done:** the first tag hasn't been pushed
-(needs the `NUGET_API_KEY` secret added first); §2.12's `vm.max_map_count` note
-still to fold into the packaged-install story. Version flows from
-`Directory.Build.props` (1.0.0). Winget + a Homebrew tap are **parked** as
-follow-on channels over the same self-contained publish.
+(permanent on nuget.org). **Open:** the `NUGET_API_KEY` secret must exist on the
+repo for a tag push to publish (the first `v1.1.0` release depends on it);
+§2.12's `vm.max_map_count` note still to fold into the packaged-install story.
+Version flows from `Directory.Build.props` (1.1.0 — the Jira bare-HTML route,
+§2.5). Winget + a Homebrew tap are **parked** as follow-on channels over the
+same self-contained publish.
 
 ### Phase 15 — draw.io diagrams ✅ **Done** *(built out of order — Phase 14 still open)*
 Diagrams carry knowledge (DB table relations, service topologies) that is

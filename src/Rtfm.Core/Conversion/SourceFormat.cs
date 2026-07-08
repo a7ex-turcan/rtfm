@@ -12,6 +12,13 @@ public enum SourceFormat
     /// <summary>MIME multipart/related HTML — Confluence's "Export to Word" output (.doc).</summary>
     Mhtml,
 
+    /// <summary>
+    /// Bare HTML — Jira's "Export to Word" output (.doc), plus .html/.htm files.
+    /// Unlike <see cref="Mhtml"/> it is not MIME-wrapped: the bytes are just an
+    /// HTML document (often with a <c>application/vnd.ms-word</c> meta tag).
+    /// </summary>
+    Html,
+
     /// <summary>Genuine Word / Open XML (.docx). Phase 1b.</summary>
     Docx,
 

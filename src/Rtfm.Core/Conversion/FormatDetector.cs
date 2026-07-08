@@ -65,6 +65,15 @@ public static class FormatDetector
             return SourceFormat.Drawio;
         }
 
+        // Bare HTML: Jira's "Export to Word" .doc (and .html/.htm) — not MIME-
+        // wrapped like Confluence's MHTML, so it's caught only after the MHTML
+        // check above. The doctype/root tag sits at the very top of the file.
+        if (text.Contains("<!doctype html", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("<html", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Html;
+        }
+
         var ext = Path.GetExtension(path);
         if (ext.Equals(".md", StringComparison.OrdinalIgnoreCase)
             || ext.Equals(".markdown", StringComparison.OrdinalIgnoreCase))
@@ -75,6 +84,12 @@ public static class FormatDetector
         if (ext.Equals(".csv", StringComparison.OrdinalIgnoreCase))
         {
             return SourceFormat.Csv;
+        }
+
+        if (ext.Equals(".html", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".htm", StringComparison.OrdinalIgnoreCase))
+        {
+            return SourceFormat.Html;
         }
 
         if (ext.Equals(".drawio", StringComparison.OrdinalIgnoreCase))
