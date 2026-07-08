@@ -35,7 +35,7 @@ public class GeneratedDocumentStoreTests
         var content = GeneratedDocumentStore.BuildFileContent(
             "Gap analysis", "# Gap Analysis\n\nBody text.", "alex", DateTimeOffset.UnixEpoch);
 
-        Assert.Single(content.Split('\n').Where(l => l.StartsWith("# ", StringComparison.Ordinal)));
+        Assert.Single(content.Split('\n'), l => l.StartsWith("# ", StringComparison.Ordinal));
         Assert.Contains("Body text.", content);
     }
 }

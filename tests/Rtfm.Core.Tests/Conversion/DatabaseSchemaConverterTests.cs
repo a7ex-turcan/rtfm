@@ -21,6 +21,7 @@ public class DatabaseSchemaConverterTests
             Assert.Equal("postgres", descriptor.Provider);
             Assert.Equal("Host=x;Password=s3cret;Database=d", descriptor.ConnectionString);
             Assert.Equal("Ref DB", descriptor.Name);
+            Assert.NotNull(descriptor.Schemas);
             Assert.Equal(["public"], descriptor.Schemas);
         }
         finally
