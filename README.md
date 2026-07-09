@@ -314,7 +314,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm purge`          | `<project> [--yes]`                                        | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                     |
 | `rtfm convert`        | `<path>`                                                   | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                         |
 | `rtfm chunk`          | `<path>`                                                   | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                           |
-| `rtfm mcp-config`     | `--client <name> [--project <name>] [--dll <path>] [--write [--file <path>]]` | Prints a ready-to-paste MCP server config snippet for a client (`cursor`, `vscode`, `zed`, `windsurf`, `cline`, `continue`, `claude-code`, `claude-desktop`). Snippet → stdout (pipeable); target file + caveats → stderr. Defaults to the installed `rtfm-mcp` command; `--dll` emits the from-a-clone form. `--write` merges into a JSON config in place (idempotent, `.bak` backup, refuses commented files). Run with no `--client` to list them. |
+| `rtfm mcp-config`     | `--client <name> [--project <name>] [--dll <path>] [--write [--file <path>] [--force]]` | Prints a ready-to-paste MCP server config snippet for a client (`cursor`, `vscode`, `zed`, `windsurf`, `cline`, `continue`, `claude-code`, `claude-desktop`). Snippet → stdout (pipeable); target file + caveats → stderr. Defaults to the installed `rtfm-mcp` command; `--dll` emits the from-a-clone form. `--write` merges into a JSON config in place (idempotent, `.bak` backup, refuses commented files; `--force` rewrites them anyway, dropping comments). Run with no `--client` to list them. |
 | `rtfm --version`      | `(-v)`                                                     | Prints the installed `rtfm` version.                                                                                                                                                                                                                                                                                                                      |
 
 **Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
@@ -636,9 +636,11 @@ rtfm mcp-config --client zed --write --file ~/.config/zed/settings.json
 `--write` is idempotent (replaces the `rtfm` entry, keeps every other server and
 top-level key), backs the file up (`.bak`) first, and — importantly — **refuses
 to rewrite a file that contains comments** (JSONC), printing the snippet to paste
-instead so it never eats your comments. Claude Code / Cursor / VS Code default to
-their project-local file; other clients need an explicit `--file`. Continue's
-YAML config is print-only.
+instead so it never eats your comments. Add `--force` to rewrite a commented file
+anyway (comments are dropped — System.Text.Json can't preserve them — but the
+`.bak` is your safety net). Claude Code / Cursor / VS Code default to their
+project-local file; other clients need an explicit `--file`. Continue's YAML
+config is print-only.
 
 | Client                  | Config file                                             | Shape                                   |
 |-------------------------|---------------------------------------------------------|-----------------------------------------|

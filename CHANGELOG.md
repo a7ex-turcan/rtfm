@@ -23,7 +23,8 @@ mirrors the matching section below into the release notes.
     preserves every other server and top-level key in the file.
   - Backs the file up (`.bak`) before writing.
   - **Refuses to rewrite a file that contains comments (JSONC)** — it prints the
-    snippet to paste instead, so hand-written comments are never lost.
+    snippet to paste instead, so hand-written comments are never lost. `--force`
+    overrides this (comments are dropped, but the `.bak` is kept).
   - Defaults the target to the project-local config for Claude Code
     (`.mcp.json`), Cursor (`.cursor/mcp.json`), and VS Code (`.vscode/mcp.json`);
     other clients take an explicit `--file <path>`. Continue (YAML) stays

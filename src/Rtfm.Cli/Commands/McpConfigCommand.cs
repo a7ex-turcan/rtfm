@@ -58,6 +58,7 @@ internal static class McpConfigCommand
         string? dll = null;
         string? file = null;
         var write = false;
+        var force = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -78,6 +79,9 @@ internal static class McpConfigCommand
                 case "--write" or "-w":
                     write = true;
                     break;
+                case "--force" or "-F":
+                    force = true;
+                    break;
                 default:
                     Console.Error.WriteLine($"rtfm mcp-config: unexpected argument '{args[i]}'.");
                     PrintClientList();
@@ -88,6 +92,12 @@ internal static class McpConfigCommand
         if (file is not null && !write)
         {
             Console.Error.WriteLine("rtfm mcp-config: --file only applies with --write.");
+            return 2;
+        }
+
+        if (force && !write)
+        {
+            Console.Error.WriteLine("rtfm mcp-config: --force only applies with --write.");
             return 2;
         }
 
@@ -112,7 +122,7 @@ internal static class McpConfigCommand
             ?? "http://localhost:9200";
 
         return write
-            ? WriteConfig(client, resolvedProject, openSearchUrl, dll, file)
+            ? WriteConfig(client, resolvedProject, openSearchUrl, dll, file, force)
             : PrintConfig(client, resolvedProject, openSearchUrl, dll);
     }
 
@@ -132,7 +142,7 @@ internal static class McpConfigCommand
     }
 
     /// <summary>Merges the <c>rtfm</c> server into a JSON config file in place, idempotently, backing up first.</summary>
-    private static int WriteConfig(ClientInfo client, string project, string url, string? dll, string? fileArg)
+    private static int WriteConfig(ClientInfo client, string project, string url, string? dll, string? fileArg, bool force)
     {
         if (client.Flavor == "continue")
         {
@@ -171,12 +181,14 @@ internal static class McpConfigCommand
             }
             else
             {
-                // Refuse to rewrite a commented (JSONC) file — re-serializing would
-                // silently drop the user's comments. Print instead.
-                if (HasComments(text))
+                // Refuse to rewrite a commented (JSONC) file by default —
+                // re-serializing can't preserve comments. --force overrides
+                // (comments are dropped; the .bak is the safety net).
+                var commented = HasComments(text);
+                if (commented && !force)
                 {
                     Console.Error.WriteLine($"rtfm mcp-config: {target} contains comments (JSONC); not rewriting it (that would lose them).");
-                    Console.Error.WriteLine("Paste this block into it manually:");
+                    Console.Error.WriteLine("Paste this block into it manually, or re-run with --force to rewrite anyway (comments dropped; a .bak is kept):");
                     Console.Out.WriteLine(Render(client.Flavor, project, url, dll));
                     return 1;
                 }
@@ -184,12 +196,23 @@ internal static class McpConfigCommand
                 JsonNode? parsed;
                 try
                 {
-                    parsed = JsonNode.Parse(text);
+                    // Lenient parse so --force can read JSONC; comments are then
+                    // dropped on re-serialize (the whole reason for the refusal above).
+                    parsed = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions
+                    {
+                        CommentHandling = JsonCommentHandling.Skip,
+                        AllowTrailingCommas = true,
+                    });
                 }
                 catch (JsonException ex)
                 {
                     Console.Error.WriteLine($"rtfm mcp-config: {target} isn't valid JSON: {ex.Message}");
                     return 1;
+                }
+
+                if (commented)
+                {
+                    Console.Error.WriteLine($"rtfm mcp-config: --force: rewriting {target} without its comments (backup kept as {target}.bak).");
                 }
 
                 if (parsed is not JsonObject obj)
@@ -370,7 +393,7 @@ internal static class McpConfigCommand
 
     private static void PrintClientList()
     {
-        Console.Error.WriteLine("usage: rtfm mcp-config --client <name> [--project <name>] [--dll <path>] [--write [--file <path>]]");
+        Console.Error.WriteLine("usage: rtfm mcp-config --client <name> [--project <name>] [--dll <path>] [--write [--file <path>] [--force]]");
         Console.Error.WriteLine();
         Console.Error.WriteLine("Supported clients:");
         foreach (var c in Clients)
@@ -381,7 +404,7 @@ internal static class McpConfigCommand
         Console.Error.WriteLine();
         Console.Error.WriteLine("Without --write, prints the snippet to stdout (pipeable); notes go to stderr.");
         Console.Error.WriteLine("With --write, merges the 'rtfm' server into a JSON config in place (backup first;");
-        Console.Error.WriteLine("refuses to rewrite a file with comments). Default uses the installed 'rtfm-mcp'");
-        Console.Error.WriteLine("tool; pass --dll <path> for a from-source build.");
+        Console.Error.WriteLine("refuses to rewrite a file with comments unless --force, which drops them).");
+        Console.Error.WriteLine("Default uses the installed 'rtfm-mcp' tool; pass --dll <path> for a from-source build.");
     }
 }
