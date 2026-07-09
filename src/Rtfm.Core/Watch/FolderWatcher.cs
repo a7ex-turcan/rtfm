@@ -38,18 +38,29 @@ public sealed class FolderWatcher
     private readonly ManifestStore _manifestStore;
     private readonly Action<WatchEvent> _onEvent;
     private readonly TimeSpan _debounceWindow;
+    private readonly SemaphoreSlim? _ingestGate;
 
     private readonly ConcurrentDictionary<string, Pending> _pending = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _drainLock = new(1, 1);
     private DocumentManifest _manifest = new();
 
+    /// <param name="ingestGate">
+    /// Optional cross-watcher gate. When several watchers share one
+    /// <see cref="DocumentIngestor"/> (the multi-folder <c>watch</c>), pass a
+    /// shared <c>SemaphoreSlim(1, 1)</c> so their ingest/remove calls serialize —
+    /// the shared embedder tolerates concurrency, but the contradiction detector
+    /// and OCR engine aren't audited for it, and a background freshness keeper
+    /// gains nothing from parallel ingest. Null (the single-folder default)
+    /// leaves behavior exactly as before.
+    /// </param>
     public FolderWatcher(
         string folder,
         string project,
         DocumentIngestor ingestor,
         ManifestStore manifestStore,
         Action<WatchEvent>? onEvent = null,
-        TimeSpan? debounceWindow = null)
+        TimeSpan? debounceWindow = null,
+        SemaphoreSlim? ingestGate = null)
     {
         _folder = folder;
         _project = project;
@@ -57,6 +68,7 @@ public sealed class FolderWatcher
         _manifestStore = manifestStore;
         _onEvent = onEvent ?? (_ => { });
         _debounceWindow = debounceWindow ?? TimeSpan.FromMilliseconds(500);
+        _ingestGate = ingestGate;
     }
 
     /// <summary>
@@ -160,7 +172,7 @@ public sealed class FolderWatcher
 
             try
             {
-                var n = await _ingestor.IngestFileAsync(original, _project, indexedAt, cancellationToken).ConfigureAwait(false);
+                var n = await IngestGatedAsync(original, indexedAt, cancellationToken).ConfigureAwait(false);
                 _manifest.Set(key, entry);
                 indexed++;
                 _onEvent(new WatchEvent(WatchEventKind.Reconciled, Path.GetFileName(original), n));
@@ -177,7 +189,7 @@ public sealed class FolderWatcher
         {
             try
             {
-                await _ingestor.RemoveFileAsync(key, cancellationToken).ConfigureAwait(false);
+                await RemoveGatedAsync(key, cancellationToken).ConfigureAwait(false);
                 _manifest.Remove(key);
                 removed++;
                 _onEvent(new WatchEvent(WatchEventKind.Removed, key));
@@ -239,7 +251,7 @@ public sealed class FolderWatcher
                 {
                     if (pending.Kind == ChangeKind.Delete)
                     {
-                        await _ingestor.RemoveFileAsync(pending.OriginalPath, cancellationToken).ConfigureAwait(false);
+                        await RemoveGatedAsync(pending.OriginalPath, cancellationToken).ConfigureAwait(false);
                         _manifest.Remove(key);
                         _onEvent(new WatchEvent(WatchEventKind.Deleted, Path.GetFileName(pending.OriginalPath)));
                         dirty = true;
@@ -291,7 +303,7 @@ public sealed class FolderWatcher
 
             try
             {
-                return await _ingestor.IngestFileAsync(path, _project, indexedAt, cancellationToken).ConfigureAwait(false);
+                return await IngestGatedAsync(path, indexedAt, cancellationToken).ConfigureAwait(false);
             }
             catch (IOException) when (attempt < maxAttempts)
             {
@@ -299,6 +311,42 @@ public sealed class FolderWatcher
                 // this backoff catches the rest.
                 await Task.Delay(TimeSpan.FromMilliseconds(150 * attempt), cancellationToken).ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>Ingests one file, holding the shared gate (if any) only for the ingest itself.</summary>
+    private async Task<int> IngestGatedAsync(string path, DateTimeOffset indexedAt, CancellationToken cancellationToken)
+    {
+        if (_ingestGate is not null)
+        {
+            await _ingestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await _ingestor.IngestFileAsync(path, _project, indexedAt, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ingestGate?.Release();
+        }
+    }
+
+    /// <summary>Removes one document's chunks, holding the shared gate (if any).</summary>
+    private async Task RemoveGatedAsync(string path, CancellationToken cancellationToken)
+    {
+        if (_ingestGate is not null)
+        {
+            await _ingestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await _ingestor.RemoveFileAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _ingestGate?.Release();
         }
     }
 

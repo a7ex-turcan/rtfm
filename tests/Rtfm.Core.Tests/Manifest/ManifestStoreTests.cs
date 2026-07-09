@@ -103,6 +103,33 @@ public class ManifestStoreTests
         }
     }
 
+    [Fact]
+    public void ListAll_exposes_original_cased_folder_for_watch_all()
+    {
+        // `watch --all` re-opens folders from the manifests; the manifest key is
+        // lower-cased (§2.12) but must not be what we try to open on a
+        // case-sensitive OS — the original casing is preserved for that.
+        var project = NewTestProject();
+        try
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "rtfm-tests", "MixedCase-" + Guid.NewGuid().ToString("n"));
+            var m = new DocumentManifest();
+            m.Set("d:/docs/a.md", new ManifestEntry(1, 2));
+            ManifestStore.For(folder, project).Save(m);
+
+            var info = ManifestStore.ListAll().Single(x => x.Project == project);
+
+            var expected = Path.GetFullPath(folder);
+            Assert.Equal(expected, info.OpenableFolder);          // original casing, native separators
+            Assert.Contains("MixedCase", info.OpenableFolder);    // not lower-cased
+            Assert.Equal(expected.Replace('\\', '/').ToLowerInvariant(), info.Folder); // key stays normalized
+        }
+        finally
+        {
+            ManifestStore.PurgeManifests(project);
+        }
+    }
+
     // A distinct, non-existent folder per test so runs don't collide.
     private static string NewTempFolder()
         => Path.Combine(Path.GetTempPath(), "rtfm-tests", Guid.NewGuid().ToString("n"));

@@ -14,15 +14,17 @@ namespace Rtfm.Core.Manifest;
 /// </summary>
 public sealed class ManifestStore
 {
-    private const int Version = 1;
+    private const int Version = 2;
 
     private readonly string _folder;
+    private readonly string _folderOriginal;
     private readonly string _project;
     private readonly string _filePath;
 
-    private ManifestStore(string folder, string project, string filePath)
+    private ManifestStore(string folder, string folderOriginal, string project, string filePath)
     {
         _folder = folder;
+        _folderOriginal = folderOriginal;
         _project = project;
         _filePath = filePath;
     }
@@ -39,7 +41,11 @@ public sealed class ManifestStore
 
         var dir = ManifestsDirectory;
         Directory.CreateDirectory(dir);
-        return new ManifestStore(normalizedFolder, project, Path.Combine(dir, $"{hash}.json"));
+        // The hash key (identity) stays on the normalized folder, but we also
+        // keep the original-cased absolute path so `watch --all` can re-open the
+        // folder on a case-sensitive filesystem — the normalized key is
+        // lower-cased and would not open on Linux/macOS (§2.12).
+        return new ManifestStore(normalizedFolder, Path.GetFullPath(folder), project, Path.Combine(dir, $"{hash}.json"));
     }
 
     /// <summary>
@@ -98,7 +104,8 @@ public sealed class ManifestStore
                         parsed.Project,
                         parsed.Folder,
                         parsed.Entries?.Count ?? 0,
-                        File.GetLastWriteTimeUtc(file)));
+                        File.GetLastWriteTimeUtc(file),
+                        parsed.FolderOriginal));
                 }
             }
             catch (Exception ex) when (ex is JsonException or IOException)
@@ -162,7 +169,8 @@ public sealed class ManifestStore
             Version,
             _folder,
             _project,
-            manifest.Entries.ToDictionary(kv => kv.Key, kv => new EntryDto(kv.Value.LastWriteUtcTicks, kv.Value.Length)));
+            manifest.Entries.ToDictionary(kv => kv.Key, kv => new EntryDto(kv.Value.LastWriteUtcTicks, kv.Value.Length)),
+            _folderOriginal);
 
         var json = JsonSerializer.Serialize(file, new JsonSerializerOptions { WriteIndented = true });
         var temp = _filePath + ".tmp";
@@ -176,10 +184,18 @@ public sealed class ManifestStore
         return string.IsNullOrWhiteSpace(dir) ? Path.GetTempPath() : dir;
     }
 
-    private sealed record ManifestFile(int Version, string Folder, string Project, Dictionary<string, EntryDto> Entries);
+    // FolderOriginal is last + nullable so pre-v2 manifests (which lack it)
+    // still deserialize; it back-fills on the next save.
+    private sealed record ManifestFile(int Version, string Folder, string Project, Dictionary<string, EntryDto> Entries, string? FolderOriginal = null);
 
     private sealed record EntryDto(long T, long L);
 }
 
-/// <summary>One cached watch manifest, for <c>rtfm status</c> (Phase 10).</summary>
-public sealed record ManifestInfo(string Project, string Folder, int TrackedFiles, DateTime UpdatedUtc);
+/// <summary>One cached watch manifest, for <c>rtfm status</c> (Phase 10) and <c>rtfm watch --all</c>.</summary>
+/// <param name="Folder">The normalized (lower-cased) folder key — the manifest's identity.</param>
+/// <param name="FolderOriginal">The original-cased absolute path, when known; use <see cref="OpenableFolder"/> to open the folder.</param>
+public sealed record ManifestInfo(string Project, string Folder, int TrackedFiles, DateTime UpdatedUtc, string? FolderOriginal = null)
+{
+    /// <summary>A path safe to open on any filesystem: the original casing when recorded, else the normalized key (fine on Windows).</summary>
+    public string OpenableFolder => FolderOriginal ?? Folder;
+}

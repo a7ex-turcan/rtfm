@@ -106,7 +106,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]init[/] [dim][[--with-model]][/]", "Bootstrap: start OpenSearch (docker), create index + pipeline");
     commands.AddRow($"[{Ui.Accent}]ping[/]", "Check connectivity to OpenSearch");
     commands.AddRow($"[{Ui.Accent}]index[/] [dim]<folder> [[--project <name>]][/]", "(Re)index a folder (default project \"default\")");
-    commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder> [[--project <name>]][/]", "Watch a folder and keep the index fresh (Ctrl+C to stop)");
+    commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder...> [[--project <name>]] | --all[/]", "Watch one/many folders (or --all indexed) and keep the index fresh");
     commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
     commands.AddRow($"[{Ui.Accent}]status[/] [dim][[--project <name>]] [[--stale <days>]][/]", "Index health: projects, counts, vector coverage, staleness");
     commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project]] [[--closed]] | dismiss <id> | resolve <id> --note <text>[/]", "Doc-vs-doc disagreements: list, dismiss, or resolve into an override note");
