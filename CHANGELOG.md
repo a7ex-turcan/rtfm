@@ -14,6 +14,21 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.3.0] - 2026-07-09
+
+### Added
+- `rtfm mcp-config --write` merges the `rtfm` server into an existing JSON MCP
+  config **in place**, instead of only printing the snippet:
+  - Idempotent — replaces the `rtfm` entry if present, adds it if not, and
+    preserves every other server and top-level key in the file.
+  - Backs the file up (`.bak`) before writing.
+  - **Refuses to rewrite a file that contains comments (JSONC)** — it prints the
+    snippet to paste instead, so hand-written comments are never lost.
+  - Defaults the target to the project-local config for Claude Code
+    (`.mcp.json`), Cursor (`.cursor/mcp.json`), and VS Code (`.vscode/mcp.json`);
+    other clients take an explicit `--file <path>`. Continue (YAML) stays
+    print-only.
+
 ## [1.2.0] - 2026-07-09
 
 ### Added
@@ -85,6 +100,7 @@ Initial versioned release — the full tool, end to end.
   one-shot `rtfm init` machine bootstrap.
 - Cross-platform CI across Windows, macOS, and Linux.
 
+[1.3.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.3.0
 [1.2.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.2.0
 [1.1.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.1.0
 [1.0.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.0.0

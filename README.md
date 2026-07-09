@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.2.0-FF8C00" alt="version 1.2.0">
+  <img src="https://img.shields.io/badge/version-1.3.0-FF8C00" alt="version 1.3.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -314,7 +314,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm purge`          | `<project> [--yes]`                                        | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                     |
 | `rtfm convert`        | `<path>`                                                   | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                         |
 | `rtfm chunk`          | `<path>`                                                   | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                           |
-| `rtfm mcp-config`     | `--client <name> [--project <name>] [--dll <path>]`        | Prints a ready-to-paste MCP server config snippet for a client (`cursor`, `vscode`, `zed`, `windsurf`, `cline`, `continue`, `claude-code`, `claude-desktop`). Snippet → stdout (pipeable); target file + caveats → stderr. Defaults to the installed `rtfm-mcp` command; `--dll` emits the from-a-clone form. Run with no `--client` to list them.       |
+| `rtfm mcp-config`     | `--client <name> [--project <name>] [--dll <path>] [--write [--file <path>]]` | Prints a ready-to-paste MCP server config snippet for a client (`cursor`, `vscode`, `zed`, `windsurf`, `cline`, `continue`, `claude-code`, `claude-desktop`). Snippet → stdout (pipeable); target file + caveats → stderr. Defaults to the installed `rtfm-mcp` command; `--dll` emits the from-a-clone form. `--write` merges into a JSON config in place (idempotent, `.bak` backup, refuses commented files). Run with no `--client` to list them. |
 | `rtfm --version`      | `(-v)`                                                     | Prints the installed `rtfm` version.                                                                                                                                                                                                                                                                                                                      |
 
 **Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
@@ -624,6 +624,21 @@ The snippet prints to **stdout** (pipe it straight into a config file); the
 target path and any caveats print to **stderr**. It assumes the `rtfm-mcp`
 global tool is on your PATH ([install it](#install-as-a-net-global-tool)); pass
 `--dll <path>` to emit the from-a-clone form (`dotnet <rtfm-mcp.dll>`) instead.
+
+Add `--write` to **merge it into a config file for you** instead of printing:
+
+```bash
+rtfm mcp-config --client claude-code --write            # merge into ./.mcp.json
+rtfm mcp-config --client cursor --write --project pam    # merge into ./.cursor/mcp.json
+rtfm mcp-config --client zed --write --file ~/.config/zed/settings.json
+```
+
+`--write` is idempotent (replaces the `rtfm` entry, keeps every other server and
+top-level key), backs the file up (`.bak`) first, and — importantly — **refuses
+to rewrite a file that contains comments** (JSONC), printing the snippet to paste
+instead so it never eats your comments. Claude Code / Cursor / VS Code default to
+their project-local file; other clients need an explicit `--file`. Continue's
+YAML config is print-only.
 
 | Client                  | Config file                                             | Shape                                   |
 |-------------------------|---------------------------------------------------------|-----------------------------------------|
