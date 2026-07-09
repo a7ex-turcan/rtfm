@@ -48,6 +48,9 @@ switch (args[0])
     case "note":
         return await NoteCommand.RunAsync(args[1..]);
 
+    case "mcp-config":
+        return McpConfigCommand.Run(args[1..]);
+
     default:
         Console.Error.WriteLine($"rtfm: unknown command '{args[0]}'. Run 'rtfm --help'.");
         return 1;
@@ -112,6 +115,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project]] [[--closed]] | dismiss <id> | resolve <id> --note <text>[/]", "Doc-vs-doc disagreements: list, dismiss, or resolve into an override note");
     commands.AddRow($"[{Ui.Accent}]note[/] [dim]add <text>|list|rm <id> [[--project]] [[--doc <path>]][/]", "Override notes: corrections that survive re-indexing");
     commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
+    commands.AddRow($"[{Ui.Accent}]mcp-config[/] [dim]--client <name> [[--project <name>]][/]", "Print an MCP config snippet for a client (cursor, vscode, zed, …)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");
     commands.AddRow($"[{Ui.Accent}]chunk[/] [dim]<path>[/]", "Convert then show heading-aware chunks (stdout)");
     commands.AddRow($"[{Ui.Accent}]--version[/] [dim](-v)[/]", "Print the rtfm version");

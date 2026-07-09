@@ -26,6 +26,14 @@ mirrors the matching section below into the release notes.
   its own model. Ingest work is serialized across folders by a shared gate.
 - Multi-folder live dashboard: a **Source** column attributes each event to its
   folder/project.
+- **Support for other MCP clients.** RTFM's server has always been a standard
+  stdio MCP server, so any MCP-capable agent (Cursor, VS Code Copilot agent
+  mode, Windsurf, Cline, Continue, Zed, Claude Desktop, …) can use it. New:
+  - `rtfm mcp-config --client <name>` prints a ready-to-paste config snippet in
+    the right shape for each client (snippet → stdout, target file + caveats →
+    stderr).
+  - A "Wiring into other MCP clients" README section with per-client config
+    files and shapes.
 
 ### Changed
 - Watch manifests now persist the **original-cased folder path** so `--all` can

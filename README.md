@@ -20,7 +20,7 @@ search tool for your LLM.
 RTFM indexes a folder of documentation — Confluence exports, Word, Markdown,
 PDF, Excel, CSV, draw.io diagrams — into a local
 [OpenSearch](https://opensearch.org/) instance and exposes it to any MCP-capable
-LLM client (Claude Code, Claude Desktop, IDE integrations) over a stdio
+LLM client (Claude Code, Cursor, VS Code, Zed, Windsurf, Claude Desktop, …) over a stdio
 [Model Context Protocol](https://modelcontextprotocol.io/) server. Instead of
 manually attaching docs to a chat, you ask your LLM a question and it retrieves
 the relevant passages itself.
@@ -314,6 +314,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm purge`          | `<project> [--yes]`                                        | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                     |
 | `rtfm convert`        | `<path>`                                                   | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                         |
 | `rtfm chunk`          | `<path>`                                                   | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                           |
+| `rtfm mcp-config`     | `--client <name> [--project <name>] [--dll <path>]`        | Prints a ready-to-paste MCP server config snippet for a client (`cursor`, `vscode`, `zed`, `windsurf`, `cline`, `continue`, `claude-code`, `claude-desktop`). Snippet → stdout (pipeable); target file + caveats → stderr. Defaults to the installed `rtfm-mcp` command; `--dll` emits the from-a-clone form. Run with no `--client` to list them.       |
 | `rtfm --version`      | `(-v)`                                                     | Prints the installed `rtfm` version.                                                                                                                                                                                                                                                                                                                      |
 
 **Supported document formats**: `.doc` (Confluence MHTML), `.docx`, `.md`,
@@ -602,6 +603,51 @@ Notes:
   (= search all projects, every hit attributed) is the sensible default. Add
   `"RTFM_PROJECT": "yourproject"` to the `env` block to pin it.
 - OpenSearch must be running (`rtfm init`, or Docker Desktop autostart).
+
+### Wiring into other MCP clients
+
+RTFM's server is a **standard stdio [MCP](https://modelcontextprotocol.io/)
+server** — nothing about it is Claude-specific. Any MCP-capable coding agent can
+use it; only each client's *config file format* differs. The tools, and the
+guidance baked into their descriptions, work with any capable model.
+
+The easy button is to let RTFM print the right snippet for your client:
+
+```bash
+rtfm mcp-config --client cursor  --project payments   # Cursor
+rtfm mcp-config --client vscode  --project payments   # VS Code (Copilot agent mode)
+rtfm mcp-config --client zed                          # Zed
+rtfm mcp-config                                        # list all supported clients
+```
+
+The snippet prints to **stdout** (pipe it straight into a config file); the
+target path and any caveats print to **stderr**. It assumes the `rtfm-mcp`
+global tool is on your PATH ([install it](#install-as-a-net-global-tool)); pass
+`--dll <path>` to emit the from-a-clone form (`dotnet <rtfm-mcp.dll>`) instead.
+
+| Client                  | Config file                                             | Shape                                   |
+|-------------------------|---------------------------------------------------------|-----------------------------------------|
+| Claude Code             | `.mcp.json` (repo root)                                  | `mcpServers`                            |
+| Claude Desktop          | `claude_desktop_config.json`                             | `mcpServers` (absolute command path)    |
+| Cursor                  | `.cursor/mcp.json` or `~/.cursor/mcp.json`              | `mcpServers`                            |
+| Windsurf                | `~/.codeium/windsurf/mcp_config.json`                   | `mcpServers`                            |
+| Cline                   | `cline_mcp_settings.json` (extension → MCP Servers)     | `mcpServers`                            |
+| VS Code (Copilot agent) | `.vscode/mcp.json`                                      | `servers` + `"type": "stdio"`           |
+| Zed                     | `settings.json`                                         | `context_servers`                       |
+| Continue                | `~/.continue/config.yaml`                               | `mcpServers:` (YAML) — *verify version* |
+
+Two portability notes:
+
+- **Prefer the installed `rtfm-mcp` command** on non-Claude clients. The
+  `${RTFM_HOME:-.}` env-expansion trick in this repo's `.mcp.json` is a *Claude
+  Code* convenience — not every client expands `${...}`. The global tool is a
+  bare command on PATH, so there's nothing to expand.
+- **Per-project scope** (`RTFM_PROJECT`) is just an env var in whichever config
+  file your client uses, so it works everywhere; omit it to search all projects.
+
+Config file locations move between client versions — if a path above is stale,
+check that client's current MCP docs. The *shape* (the JSON/YAML key) is the
+stable part.
 
 ## Documentation
 
