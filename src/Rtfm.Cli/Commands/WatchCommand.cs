@@ -328,16 +328,19 @@ internal static class WatchCommand
 
             if (_multi)
             {
+                // Compact, fixed-height header: a single summary line naming the
+                // projects. The per-folder list used to add one row per folder
+                // (unbounded height) and carried ambiguous-width glyphs (•, →);
+                // the feed's Source column already attributes each event to its
+                // folder, so the list was redundant. Per-folder attribution and
+                // the constant Live repaint of that tall block is what made
+                // Windows Terminal ring the bell under `--all`.
                 var projects = _targets.Select(t => t.Project).Distinct(StringComparer.Ordinal).ToList();
                 header.AddRow(
                     new Markup("[dim]watching[/]"),
-                    new Markup($"[{Ui.Accent}]{_targets.Count}[/] folders across " +
+                    new Markup($"[{Ui.Accent}]{_targets.Count}[/] folder{(_targets.Count == 1 ? "" : "s")} across " +
                                $"[{Ui.Accent}]{projects.Count}[/] project{(projects.Count == 1 ? "" : "s")} " +
                                $"[dim]({Ui.E(string.Join(", ", projects))})[/]"));
-                foreach (var (folder, project) in _targets)
-                {
-                    header.AddRow(new Markup("[dim] •[/]"), new Markup($"{Ui.E(folder)}  [dim]→[/]  [{Ui.Accent}]{Ui.E(project)}[/]"));
-                }
             }
             else
             {

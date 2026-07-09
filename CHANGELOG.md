@@ -14,6 +14,18 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.3.1] - 2026-07-09
+
+### Fixed
+- `rtfm watch --all` (and any multi-folder watch) no longer makes the terminal
+  ring its bell continuously. The multi-folder live dashboard listed **one
+  header row per watched folder** — an unbounded, tall block carrying
+  ambiguous-width glyphs (`•`, `→`) that Spectre repainted in place every
+  second; Windows Terminal answered each repaint with its bell. The header is
+  now a single compact summary line (`watching N folders across M projects …`);
+  per-folder attribution is unchanged (it still shows in the feed's **Source**
+  column). Single-folder `watch` was never affected.
+
 ## [1.3.0] - 2026-07-09
 
 ### Added
