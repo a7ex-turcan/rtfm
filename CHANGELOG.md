@@ -9,6 +9,11 @@ The version is declared once in `Directory.Build.props` and flows to every
 assembly, the `rtfm` CLI banner, and the MCP server's advertised
 `serverInfo.version`.
 
+Each released version also appears as a
+[GitHub Release](https://github.com/a7ex-turcan/rtfm/releases): pushing a
+`vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
+mirrors the matching section below into the release notes.
+
 ## [1.2.0] - 2026-07-09
 
 ### Added

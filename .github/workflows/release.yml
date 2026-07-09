@@ -28,6 +28,8 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest   # the tools are RID-agnostic; one pack covers all OSes
+    permissions:
+      contents: write   # create the GitHub Release for this tag (top-level stays read)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -56,3 +58,24 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --api-key "${{ secrets.NUGET_API_KEY }}"
           --skip-duplicate
+
+      # Mirror the matching CHANGELOG.md section into a GitHub Release, so the
+      # tag surfaces "what changed" to watchers and on /releases. Runs after the
+      # NuGet push so a failed publish never leaves an orphan release. A missing
+      # section fails loudly — same discipline as the version guard above.
+      - name: Extract changelog section for this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Literal (index) matching, not regex — the "[" in "## [x.y.z]" is a
+          # regex char-class opener and awk mishandles the escaped form.
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 {flag=1; next}
+            flag && index($0, "## [") == 1 {exit}
+            flag {print}
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md" || { echo "::error::No CHANGELOG.md section for $version"; exit 1; }
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "RTFM $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
