@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.3.2-FF8C00" alt="version 1.3.2">
+  <img src="https://img.shields.io/badge/version-1.4.0-FF8C00" alt="version 1.4.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -40,9 +40,11 @@ documents leaving your machine.
 ```
 docs/          ──►  rtfm (CLI)  ──►  OpenSearch  ──►  rtfm-mcp  ──►  your LLM
 (.doc .docx .md     convert · chunk     rtfm-docs      search_docs       client
- .pdf .xlsx .csv    · index               index          + 10 more (MCP)
- .drawio .png .jpg
- .sql .rtfmdb)
+ .pdf .xlsx .csv    · index               index          + 12 more (MCP)
+ .drawio .png .jpg                                            │
+ .sql .rtfmdb)                                                │ query_database
+                                                              ▼  (read-only, live)
+                                                        your database
 ```
 
 Three independent processes, each with its own lifecycle:
@@ -311,6 +313,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm status`         | `[--project <name>] [--stale <days>]`                      | Index health: environment (OpenSearch, embedding model cache, watch manifests) and per-project rollups — docs, chunks, vector coverage, source-date span, last index time. `--stale N` lists documents whose source date is older than N days (manual exports drift; age is the signal).                                                                  |
 | `rtfm contradictions` | `[--project <name>]`                                       | Nominated disagreements between documents of the same project: semantically-similar passages with different source dates and differing text (e.g. an old page says the default role is `admin`, a newer one `super-admin`). Nominations, not verdicts — read both sides before trusting either.                                                           |
 | `rtfm note`           | `add <text> [--project] [--doc <path>] \| list \| rm <id>` | Override notes: user-confirmed corrections that live outside the document index and **survive every re-index**. They surface in search as attributed ⚠ overrides and annotate the documents they correct — the original text stays retrievable.                                                                                                           |
+| `rtfm db`             | `list [--project <name>]` &nbsp;or&nbsp; `query <name> "<sql>" [--project <name>] [--max-rows <n>]` | The live-data gateway. `list` shows the `.rtfmdb` connectors found in your indexed folders and each one's access (schema-only / read-only / read+write); `query` runs SQL against one and prints the rows. Only descriptors carrying a `query` block are queryable, and they're read-only unless the block sets `allowWrites`. Results are capped (default 500 rows) and say so when truncated. |
 | `rtfm purge`          | `<project> [--yes]`                                        | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                     |
 | `rtfm convert`        | `<path>`                                                   | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                         |
 | `rtfm chunk`          | `<path>`                                                   | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                           |
@@ -427,6 +430,48 @@ credentials in the file** (docs folders get shared and committed):
   "connectionString": "Host=db.internal;Username=readonly;Password=${BILLING_DB_PW};Database=billing" }
 ```
 
+Add an optional **`query` block** and the same descriptor also becomes a **data
+gateway** — your agent can then query the actual rows, not just the schema
+(`query_database` over MCP, or `rtfm db query`):
+
+```json
+{ "provider": "postgres", "name": "Billing reference DB",
+  "connectionString": "Host=db.internal;Username=readonly;Password=${BILLING_DB_PW};Database=billing",
+  "query": {
+    "connectionString": "Host=db.internal;Username=rtfm_ro;Password=${BILLING_DB_RO_PW};Database=billing",
+    "maxRows": 500,
+    "timeoutSeconds": 10
+  } }
+```
+
+This is the point of indexing the schema in the first place: an agent that can
+query a database but doesn't know its shape writes garbage SQL. RTFM already
+has the schema, so the agent looks it up, *then* writes the query. How the
+gateway behaves:
+
+- **Opt-in.** No `query` block, no querying — the descriptor stays
+  schema-only. Existing `.rtfmdb` files do not become query endpoints by upgrading.
+- **Its own credential (optional).** Schema pull needs catalog read; querying
+  needs table read. The `query` block can carry a separate login rather than
+  reusing whatever user the schema pull uses. Omit it and it falls back to the
+  schema-pull string.
+- **Reads by default; writes are a second opt-in.** Add `"allowWrites": true`
+  to the query block for a database the agent may modify — handy for seeding a
+  local test DB. Without it, a write is rejected (Postgres: `25006` from the
+  engine) or rolled back (SQL Server, whose DDL and DML are both transactional)
+  and **reported as an error, never as a silent success**. The guard is the
+  transaction, not the login, so it holds even if you connect as a superuser.
+- **Capped, and honest about it.** Results stop at `maxRows` (default 500, hard
+  ceiling 5000) and are flagged `truncated` so the agent narrows its query
+  instead of assuming the table ended there.
+
+> **Scope, plainly.** The read guard stops an agent from *accidentally* writing;
+> it is not a security boundary, and RTFM does not try to filter your SQL for
+> dangerous keywords (CTEs, `SELECT INTO`, and side-effecting functions walk
+> straight past that — it would be false comfort). RTFM is a per-dev local tool
+> and a `.rtfmdb` points wherever you point it. Point it at local/test databases;
+> if you aim it at production, that's your call to make deliberately.
+
 **`.sql` — schemas, parsed structurally.** Not treated as plain text: a
 dialect-tolerant DDL scanner (tested against Postgres and T-SQL dumps)
 extracts tables with columns, types, and PK / NOT NULL / UNIQUE / DEFAULT
@@ -455,7 +500,7 @@ The MCP server is registered as a project-scoped server via a committed
 [`.mcp.json`](./.mcp.json), so every developer on a repo gets it on clone. With
 the tool installed (above), the config is just the bare `rtfm-mcp` command —
 see [Using RTFM from your other repos](#using-rtfm-from-your-other-repos) for the
-copy-paste template. It exposes thirteen tools:
+copy-paste template. It exposes fifteen tools:
 
 | Tool                                                | Purpose                                                                                                                                                                                                  |
 |-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -470,6 +515,8 @@ copy-paste template. It exposes thirteen tools:
 | `add_note(text, project?, path?, author?)`          | Record a **user-confirmed** correction as an override note (the agent must get an explicit yes first); omit `path` for project-level decisions; retry-safe (same text = same note)                       |
 | `list_notes(project?)` / `remove_note(id)`          | Review / delete override notes (removal only on explicit user request)                                                                                                                                   |
 | `save_document(title, markdown, project?, author?)` | Persist an LLM-produced analysis/report into the corpus ("remember this via rtfm") — written as a real `.md` under `RTFM_GENERATED_DIR`, indexed immediately, provenance line added, same title replaces |
+| `list_databases(project?)`                          | The `.rtfmdb` connectors available to query, whether each opted in, and whether it's `writable` — see [`.rtfmdb`](#supported-formats--how-theyre-read)                                                    |
+| `query_database(database, sql, max_rows?, project?)` | Run SQL against a live database and get rows back as a markdown table. Opt-in per descriptor, capped, `truncated` flagged, **read-only unless the descriptor allows writes**. The agent reads the indexed schema first, then writes SQL |
 
 Scope for all tools is set by the `RTFM_PROJECT` env var in `.mcp.json` (omit or
 pass `project="*"` to search across all projects). Path arguments accept the

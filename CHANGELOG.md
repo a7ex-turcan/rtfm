@@ -14,6 +14,43 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.4.0] - 2026-07-16
+
+### Added
+- **Live database gateway** — RTFM already indexed your database *schema*
+  (`.rtfmdb`, since 1.2); it can now read the *data*. Two new MCP tools bring
+  the surface to fifteen:
+  - `list_databases(project?)` — the `.rtfmdb` connectors found in your indexed
+    folders, each with its provider and access level.
+  - `query_database(database, sql, max_rows?, project?)` — runs SQL and returns
+    the rows as a markdown table.
+
+  The pairing is the point: an agent that can query a database but doesn't know
+  its shape writes garbage SQL. RTFM has the schema indexed, so the agent looks
+  the tables up first, *then* writes the query.
+- `rtfm db list` / `rtfm db query <name> "<sql>"` — the same gateway from the
+  console, for setup and dogfooding.
+- **Opt-in per descriptor.** A `.rtfmdb` is queryable only if it carries a
+  `query` block, which may set its own read-only `connectionString`, `maxRows`
+  (default 500), and `timeoutSeconds`. Descriptors written before this release
+  keep meaning exactly what they meant — schema pull, nothing more.
+- **Reads by default, writes on request.** Add `"allowWrites": true` to the
+  query block for a database the agent may modify (seeding a local test DB).
+  Otherwise a write is rejected by Postgres (`25006`) or rolled back on SQL
+  Server — and reported as an error, never as a silent success. The guard is a
+  transaction, not a login check, so it holds even on a superuser connection.
+  It stops an agent's stray write; it is not a security boundary, and RTFM does
+  not filter your SQL for keywords (that would be false comfort).
+- Results are capped and **truncation is detected, not assumed** — the reader
+  fetches one row past the cap, so `truncated: true` is a fact and the agent
+  knows to narrow its query rather than believing it saw the whole table.
+
+### Changed
+- `.rtfmdb` connection strings now expand `${ENV_VAR}` placeholders lazily, when
+  a connection is opened, rather than when the descriptor is parsed. Indexing
+  and querying happen in different processes, so each need only hold the secret
+  it actually uses. No change to how descriptors are written.
+
 ## [1.3.2] - 2026-07-16
 
 ### Added

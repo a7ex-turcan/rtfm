@@ -48,13 +48,24 @@ deliberate decision, not an accident (see §2).
         ┌─────────────────────────────────────────────────────────┐
         │  rtfm-mcp  (stdio MCP server)                             │
         │   tool: search_docs(query, top_k)  → ranked chunks        │
-        └───────────────────────────┬─────────────────────────────┘
-                                     │  stdio (MCP)
-                                     ▼
-        ┌─────────────────────────────────────────────────────────┐
-        │  LLM client  (Claude Code / Claude Desktop / IDE)         │
-        └─────────────────────────────────────────────────────────┘
+        │   tool: query_database(db, sql)    → rows  ──────────────┼──┐
+        └───────────────────────────┬─────────────────────────────┘  │
+                                     │  stdio (MCP)                   │ SQL (read-only,
+                                     ▼                                │  live — §2.15)
+        ┌─────────────────────────────────────────────────────────┐  │
+        │  LLM client  (Claude Code / Claude Desktop / IDE)         │  │
+        └─────────────────────────────────────────────────────────┘  │
+                                                                      ▼
+                                              ┌──────────────────────────────┐
+                                              │  your database (.rtfmdb)      │
+                                              │  schema in, data out          │
+                                              └──────────────────────────────┘
 ```
+
+The last arrow is the odd one out: every other box reads the *derived*
+OpenSearch index, but `query_database` reads live data straight from your
+database (§2.15). Everything else here is disposable and rebuildable; that
+isn't.
 
 **Why three pieces and not one:** OpenSearch must persist independently of any
 client session. The watcher must run continuously to keep the index fresh. The
@@ -275,7 +286,7 @@ One tool to start:
   `project` (§2.14). Scope defaults to `RTFM_PROJECT`; the optional `project`
   arg overrides per call (a specific project, or all).
 
-The tool surface is now thirteen tools: `search_docs` (hits carry chunk
+The tool surface is now fifteen tools: `search_docs` (hits carry chunk
 `ordinal` since Phase 21); the Phase 8 additions —
 `get_document(path, project?, around_ordinal?, radius?)` (full reassembled
 page, or just the section around a hit), `list_sources(project?, full?)`
@@ -288,7 +299,9 @@ nominations, Phase 22 kind/status); the Phase 13 correction tools —
 `list_projects` (project discovery) and `ping` (fast liveness probe); and the
 Phase 22 lifecycle verdicts — `dismiss_contradiction` and
 `resolve_contradiction` (both human-confirmed only; resolve records the
-correction as an override note anchored to the older side).
+correction as an override note anchored to the older side); and the Phase 23
+live-data gateway — `list_databases` and `query_database` (read-only, opt-in
+per descriptor, row-capped; §2.15).
 
 ### 2.12 Cross-platform (Windows, macOS, Linux)
 The tool must run on all three. The stack is portable for free (.NET, Docker'd
@@ -395,6 +408,75 @@ project" reuses delete-by-query (§2.9).
 - **Contradiction interplay (§2.13 B):** *within* a project, newer supersedes /
   flag conflicts; *across* projects, differences are **expected** — attribute
   them by project, do not flag them as contradictions.
+
+### 2.15 Live data plane (`query_database`) — the fourth arrow
+Phase 20 made a database's *schema* indexable. Phase 23 lets an agent read the
+database's *data*. This is a genuine change to what RTFM is, so it is recorded
+as a decision rather than treated as one more tool:
+
+- **Everything else in RTFM is a derived, disposable index.** `rtfm-docs` can be
+  dropped and rebuilt from the sources; §2.9's delete-by-query is safe precisely
+  because nothing there is authoritative. `query_database` is different: it
+  bypasses OpenSearch entirely and reads the live database
+  (`rtfm-mcp` → your DB — the fourth arrow on §1's diagram). The §1 picture is
+  no longer the whole truth, and neither is "Retrieval Tool For Manuals".
+- **Why it belongs here anyway:** an agent that can query a DB but doesn't know
+  the schema writes garbage SQL. RTFM already indexes the schema (Phase 18/20),
+  so the pairing — search the schema, write correct SQL, run it — is what makes
+  the query tool *good* rather than a footgun. The tool descriptions push that
+  schema-first workflow explicitly.
+- **Opt-in, per descriptor (load-bearing).** A `.rtfmdb` is queryable only if it
+  carries a `query` block. Descriptors written before Phase 23 meant "pull my
+  schema" — shipping the query tool must not silently turn them into live query
+  endpoints. Absent block ⇒ refused, and `list_databases` says "schema only".
+- **Separate credential.** Schema pull needs catalog read; querying needs table
+  read. The `query` block takes its own `connectionString` (`${ENV}` expanded)
+  so the query path isn't handed whatever read/write user the schema pull uses.
+  Omitting it falls back to the schema-pull string — still gated by the
+  read-only enforcement below, never by trust.
+  → **Env expansion is therefore lazy** (`ResolveConnectionString` /
+  `ResolveQuery`), not done at parse time: the CLI (indexing) and the MCP server
+  (querying) are different processes holding different secrets, so parsing a
+  descriptor must never require a var the current process doesn't have.
+- **Reads by default; writes are a second opt-in** (`"allowWrites": true` on the
+  query block). Writes are genuinely useful against a local test DB ("seed some
+  rows"), so they're supported — but a database is read-only until its
+  descriptor says otherwise, because the common case is an agent exploring data
+  it should not mutate.
+- **What the read guard is, and is not.** It is a guard against an agent's stray
+  write, **not a security boundary** — RTFM is a per-dev local tool (§intro) and
+  the descriptor points wherever you point it. Anyone aiming this at production
+  owns that choice. It *is* enforced at the database, and the mechanism differs
+  by provider because their capabilities do:
+  - **Postgres** — `SET TRANSACTION READ ONLY`. A write raises `25006` in the
+    engine, so the agent gets an immediate, legible error.
+  - **SQL Server** — has **no** transaction-level read-only mode (and
+    `ApplicationIntent=ReadOnly` is *not* a security control — it's an
+    availability-group routing hint). But SQL Server's DML **and DDL** are both
+    transactional, so read mode runs the statement in a transaction that is
+    **always rolled back**. Same practical guarantee, no refusal.
+  - **Not a login-permission check.** An earlier cut probed the login and
+    refused anything that could write. That is unusable for the actual audience:
+    a local dev box connects as `sa`/`db_owner`, so it would have refused *every*
+    query on the provider it was supposed to protect. The transaction guard holds
+    even on a superuser connection — verified.
+  - **A rolled-back write is reported as an error, never as a silent success.**
+    "ok, 0 rows" after an undone INSERT would leave the agent believing it wrote.
+  - **Filtering the SQL string for `DROP`/`DELETE` is theater** — CTEs,
+    `SELECT INTO`, side-effecting functions, and stacked statements all walk
+    past it. Deliberately not attempted; it would be false assurance.
+  - **Known limit:** a rollback cannot undo what escapes the transaction — a
+    procedure doing its own COMMIT, identity/sequence consumption, `xp_cmdshell`.
+- **Egress is capped, and truncation is *detected*, not assumed.** Default 500
+  rows (per-descriptor `maxRows`, hard cap 5000); the reader fetches one row
+  past the cap so `truncated: true` is a fact, letting the agent narrow its query
+  instead of believing it saw the whole table.
+- **Discovery reuses the watch manifests, not a new env var or the index.** The
+  stored `source_path` key is lower-cased and won't reopen on a case-sensitive
+  filesystem (§2.12) — the Phase 8 trap — so descriptors are found by scanning
+  each manifest's recorded folder (original casing) for `*.rtfmdb`. The
+  precondition (the folder was indexed) is already met by having the schema
+  searchable at all.
 
 ---
 
@@ -1258,6 +1340,72 @@ user as an anchored annotation), while irrelevant notes clustered at
 after which the note ranks #1 as an attributed override and unrelated queries
 stay note-free. MCP smoke: 13 tools, stdout pure JSON-RPC, closed pairs carry
 kind/status over the wire. 168/168 tests.
+
+### Phase 23 — Live data gateway: `query_database` ✅ **Done**
+Phase 20 indexed the *schema*; this reads the *data*. An agent that can query a
+DB but doesn't know the schema writes garbage SQL — RTFM already has the
+schema, so the pairing (search schema → write SQL → run it) is the point. The
+decision and its safety model are §2.15; this phase is the build.
+- `list_databases(project?)` — discovery, mirroring `list_projects`.
+- `query_database(database, sql, max_rows?, project?)` — capped, returns a
+  markdown table + a `truncated` flag; read-only unless the descriptor opts in.
+- `rtfm db list` / `rtfm db query <name> "<sql>"` for dogfooding.
+**Done when:** a `.rtfmdb` with a `query` block answers a real data question
+over MCP; one without it is refused as schema-only; a write against a
+read-mode descriptor does not persist and is reported as an error; a descriptor
+with `allowWrites` can write; the row cap truncates with a visible flag.
+
+*Delivered:* `Rtfm.Core/Database/` — a new namespace, because this is the live
+data plane, not conversion and not a derived index. `DbDescriptor` moved here
+out of `DatabaseSchemaConverter.cs` and gained the optional `query` block
+(`connectionString?`, `maxRows` = 500, `timeoutSeconds` = 10); **env expansion
+became lazy** (`ResolveConnectionString` / `ResolveQuery`) so the indexing
+process and the querying process can hold different secrets — the eager
+parse-time expansion of Phase 20 would have made the MCP server demand the
+schema-pull credential it has no business holding. `DatabaseQueryService`
+guards reads per §2.15 (Postgres `SET TRANSACTION READ ONLY`; SQL Server
+transaction + unconditional rollback, since its DDL is transactional too) and
+takes a `DatabaseInfo`, reading/parsing the descriptor itself so hosts never
+touch a connection string (`DbDescriptor` stays `internal`).
+`DatabaseRegistry` discovers `*.rtfmdb` under each manifest's
+`OpenableFolder`, resolving by filename handle then friendly name.
+**Course-correction during the phase (worth keeping):** the first cut enforced
+SQL Server read-only by probing the login and refusing anything that could
+write. The owner's "I only run this on local test DBs" flushed out that this
+was backwards — a local MSSQL connects as `sa`, so the probe would have refused
+*every* query on that provider, i.e. the enforcement broke the only use case it
+served. Replaced by the rollback guard, which holds even on a superuser
+connection (verified), plus `allowWrites` for deliberate write access. The
+lesson generalizes: an enforcement whose false-positive rate is 100% against
+the real audience isn't strict, it's broken.
+**The bug live validation caught (unit tests could not):** the reader was left
+open across `transaction.RollbackAsync`, and Npgsql allows one active command
+per connection — so *every successful SELECT* came back as "A command is
+already in progress". The write path masked it: `INSERT` failed at
+`ExecuteReaderAsync` before a reader ever opened, so the 25006 refusal looked
+perfect while reads were uniformly broken. The reader is now scoped to close
+before the rollback.
+Verified live against a throwaway Postgres 16, over **both** the CLI and raw
+MCP stdio: 15 tools advertised, stdout pure JSON-RPC; `list_databases` reports
+schema-only / read-only / read+write correctly; a join with NULLs renders as a
+markdown table; 25 rows truncate at the descriptor's `maxRows: 10` with
+`truncated: true` + a narrow-your-query note; the schema-only descriptor is
+refused; and the schema-first workflow holds (`search_docs` hits `Shop DB >
+Table: public.customers` #1). The read/write split, both ways round: against a
+read-mode descriptor **using superuser credentials**, `INSERT` and an
+unqualified `DELETE FROM customers` both → `25006 … in a read-only
+transaction`, and all 5 rows survived (checked in the DB, not just the tool
+response); against an `allowWrites` descriptor the `INSERT` returned
+`rowsAffected: 1` and the row landed. 182/182 tests.
+*Smoke-harness note:* piping requests into `rtfm-mcp` from a file makes the
+transport hit EOF instantly and shut down while handlers are still running —
+responses are dropped and stdout looks empty. Hold the pipe open
+(`( cat requests; sleep 12 ) | dotnet rtfm-mcp.dll`). A harness artifact, not
+a server bug: real clients keep stdin open.
+**Open:** the SQL Server path (read-mode rollback + write mode) is implemented
+but live-validated only for Postgres — same asymmetry Phase 20 left. The
+rollback guard leans on SQL Server's transactional DDL, which is true but
+unexercised here; run it against a real MSSQL box when one is handy.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

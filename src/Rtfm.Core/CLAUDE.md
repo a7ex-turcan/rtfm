@@ -23,6 +23,17 @@ library-local rules.
 - **`WatchEvent.ToString()` is a pinned contract.** Redirected watch output is
   parsed by scripts; the format is locked by `WatchEventTests`. Add new event
   kinds rather than changing existing lines.
+- **The read guard in `Database/` is a stray-write guard, not a security
+  boundary** (§2.15) — say it that way, and don't oversell it. It lives at the
+  *database*: `SET TRANSACTION READ ONLY` (Postgres) or a transaction that is
+  always rolled back (SQL Server, which has no read-only mode but does have
+  transactional DDL). Two invariants: a `.rtfmdb` without a `query` block stays
+  un-queryable, and one without `allowWrites` stays read-only. Never "harden" it
+  by pattern-matching the SQL string — CTEs, `SELECT INTO`, side-effecting
+  functions, and stacked statements walk past that, so it reads as protection
+  while being none. And never gate on login permissions: a local dev box is
+  `sa`/superuser, so that refuses the only users the tool has (learned the hard
+  way in Phase 23).
 - **Raw JSON over the typed client** for OpenSearch (§2.10). Query/mapping
   bodies are serialized anonymous objects or raw strings in `RtfmIndex` /
   `DocumentSearch`; don't fight `OpenSearch.Net`'s typed surface. Watch the
@@ -46,6 +57,7 @@ library-local rules.
 | `Embeddings` | `LocalEmbedder` (lazy ONNX MiniLM) + `CrossEncoder` (Tier 3 reranker, max-window scoring — full chunks dilute MS MARCO scores), `EmbeddingModelStore` (per-model download/cache); `ITextEmbedder`/`IReranker` keep callers testable |
 | `Contradictions` | `ContradictionDetector` — ingest-time kNN nomination of doc-vs-doc disagreements into the `rtfm-contradictions` side index (deterministic pair ids; *open* pairs dropped + re-evaluated when either doc re-ingests, dismissed/resolved ones are tombstones that survive and block re-nomination). Template suppression at two granularities (`content_hash` whole-chunk + `line_hashes` shared-line majority, both ≥3 docs). Nominations, never verdicts — humans close them (Phase 22: dismiss, or resolve into an override note) |
 | `Notes` | `NotesStore` — override notes (§2.13 C): user-confirmed corrections in the `rtfm-notes` index, merged into retrieval as attributed `origin:"note"` hits + anchored annotations. Survive re-index by construction |
+| `Database` | The **live data plane** (§2.15, Phase 23) — the one namespace that does *not* read the derived index: `DbDescriptor` (the `.rtfmdb` connector; env expansion is **lazy** so indexing and querying processes can hold different secrets), `DatabaseQueryService` (reads guarded *at the database* — Postgres `SET TRANSACTION READ ONLY`, SQL Server transaction+rollback; `allowWrites` opts a descriptor into writes), `DatabaseRegistry` (finds `*.rtfmdb` via manifest folders) |
 | `Manifest` | Startup-reconcile state: normalized path → (mtime ticks, length), per-(folder, project) JSON |
 | `Watch` | `FolderWatcher` (debounce/lock-retry/rename/reconcile) + `WatchEvent` |
 

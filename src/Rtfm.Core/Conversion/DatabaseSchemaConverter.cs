@@ -1,40 +1,11 @@
 using System.Data.Common;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Npgsql;
+using Rtfm.Core.Database;
 
 namespace Rtfm.Core.Conversion;
-
-/// <summary>
-/// One <c>.rtfmdb</c> connector descriptor: which database to pull a live
-/// schema from (Phase 20). Connection strings support <c>${ENV_VAR}</c>
-/// placeholders so credentials never sit in a scanned file.
-/// </summary>
-internal sealed record DbDescriptor(string Provider, string ConnectionString, string? Name, string[]? Schemas)
-{
-    private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip };
-
-    internal static DbDescriptor Parse(string json)
-    {
-        var descriptor = JsonSerializer.Deserialize<DbDescriptor>(json, Options)
-            ?? throw new InvalidDataException("empty .rtfmdb descriptor");
-
-        if (string.IsNullOrWhiteSpace(descriptor.Provider) || string.IsNullOrWhiteSpace(descriptor.ConnectionString))
-        {
-            throw new InvalidDataException(".rtfmdb needs \"provider\" and \"connectionString\"");
-        }
-
-        return descriptor with { ConnectionString = ExpandEnvironment(descriptor.ConnectionString) };
-    }
-
-    /// <summary>Replaces <c>${VAR}</c> with the environment value; missing vars fail loudly (a half-expanded secret is worse).</summary>
-    internal static string ExpandEnvironment(string value)
-        => Regex.Replace(value, @"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}", m =>
-            Environment.GetEnvironmentVariable(m.Groups["name"].Value)
-            ?? throw new InvalidDataException($"environment variable '{m.Groups["name"].Value}' referenced by the .rtfmdb descriptor is not set"));
-}
 
 /// <summary>
 /// Pulls a live database schema through a <c>.rtfmdb</c> descriptor (Phase 20)
@@ -84,12 +55,16 @@ public sealed class DatabaseSchemaConverter
             SourceModifiedAt: pulledAt);
     }
 
-    private static DbConnection CreateConnection(DbDescriptor descriptor) => descriptor.Provider.ToLowerInvariant() switch
+    private static DbConnection CreateConnection(DbDescriptor descriptor)
     {
-        "sqlserver" or "mssql" => new SqlConnection(descriptor.ConnectionString),
-        "postgres" or "postgresql" or "pgsql" => new NpgsqlConnection(descriptor.ConnectionString),
-        _ => throw new NotSupportedException($".rtfmdb provider '{descriptor.Provider}' is not supported (use \"sqlserver\" or \"postgres\")"),
-    };
+        var connectionString = descriptor.ResolveConnectionString();
+        return descriptor.Provider.ToLowerInvariant() switch
+        {
+            "sqlserver" or "mssql" => new SqlConnection(connectionString),
+            "postgres" or "postgresql" or "pgsql" => new NpgsqlConnection(connectionString),
+            _ => throw new NotSupportedException($".rtfmdb provider '{descriptor.Provider}' is not supported (use \"sqlserver\" or \"postgres\")"),
+        };
+    }
 
     private SqlSchema LoadSchema(DbConnection connection, DbDescriptor descriptor)
     {

@@ -44,6 +44,11 @@ builder.Services.AddSingleton(sp => new Rtfm.Core.Indexing.DocumentIngestor(
 builder.Services.AddSingleton(sp => new Rtfm.Core.Generated.GeneratedDocumentStore(
     sp.GetRequiredService<Rtfm.Core.Indexing.DocumentIngestor>()));
 
+// Phase 23 live-data gateway: query_database talks straight to the database
+// (not OpenSearch), so it needs no gateway/embedder — just the read-only-
+// enforcing query service. Descriptor discovery is static (DatabaseRegistry).
+builder.Services.AddSingleton(_ => new Rtfm.Core.Database.DatabaseQueryService());
+
 builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()

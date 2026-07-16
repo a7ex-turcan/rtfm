@@ -1,5 +1,6 @@
 using System.Text;
 using Rtfm.Core.Conversion;
+using Rtfm.Core.Database;
 
 namespace Rtfm.Core.Tests.Conversion;
 
@@ -10,7 +11,7 @@ namespace Rtfm.Core.Tests.Conversion;
 public class DatabaseSchemaConverterTests
 {
     [Fact]
-    public void Descriptor_parses_and_expands_environment_placeholders()
+    public void Descriptor_parses_and_expands_environment_placeholders_lazily()
     {
         Environment.SetEnvironmentVariable("RTFM_TEST_DB_PW", "s3cret");
         try
@@ -19,7 +20,11 @@ public class DatabaseSchemaConverterTests
                 """{ "provider": "postgres", "connectionString": "Host=x;Password=${RTFM_TEST_DB_PW};Database=d", "name": "Ref DB", "schemas": ["public"] }""");
 
             Assert.Equal("postgres", descriptor.Provider);
-            Assert.Equal("Host=x;Password=s3cret;Database=d", descriptor.ConnectionString);
+            // Parse keeps the string raw (§Phase 23: expansion is lazy so schema
+            // pull and query can use different creds in different processes)...
+            Assert.Equal("Host=x;Password=${RTFM_TEST_DB_PW};Database=d", descriptor.ConnectionString);
+            // ...and expands only when the connection is actually opened.
+            Assert.Equal("Host=x;Password=s3cret;Database=d", descriptor.ResolveConnectionString());
             Assert.Equal("Ref DB", descriptor.Name);
             Assert.NotNull(descriptor.Schemas);
             Assert.Equal(["public"], descriptor.Schemas);

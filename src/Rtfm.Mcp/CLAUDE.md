@@ -67,6 +67,18 @@ framing and the server silently fails to connect.
   `RTFM_GENERATED_DIR`, ingested through the full pipeline (this is why Mcp DI
   now carries `DocumentIngestor` + the contradiction detector). Same title =
   replace. The description's user-direction precondition is load-bearing.
+- `list_databases(project?)` / `query_database(database, sql, max_rows?,
+  project?)` (`DatabaseTools`, Phase 23) — the live-data gateway (§2.15). The
+  only tools that bypass OpenSearch and read the actual database. Backed by
+  `DatabaseRegistry` (static discovery) + `DatabaseQueryService` (DI; needs no
+  gateway/embedder). The read guard lives in Core, not here — don't add a
+  SQL-string filter, and don't let a descriptor without a `query` block become
+  queryable. The descriptions' schema-first workflow (search_docs/get_document
+  for the schema, *then* SQL) is what makes the tool produce correct SQL —
+  keep it. `list_databases` advertises `writable`, and `query_database`'s
+  description tells the agent to send writes only to a writable database and
+  only when asked: reads are the default and a blocked write surfaces as an
+  error, never a silent no-op.
 - Scope for every tool resolves through
   `RtfmEnvironment.ResolveProjectScope` (`RTFM_PROJECT` default, per-call
   override, `*`/`all` sentinel).
