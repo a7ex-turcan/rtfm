@@ -14,6 +14,17 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.3.2] - 2026-07-16
+
+### Added
+- `rtfm watch` sets the terminal tab/window title while it runs — an animated
+  moon-phase icon plus the watch scope (`all`, the project name, or
+  `N projects`) and a live indexed/removed/failed tally, so a backgrounded
+  watcher shows its state from the tab alone. Emitted as an OSC 0 escape on
+  stderr and only when stderr is an interactive terminal, so redirected output
+  is unchanged; the prior title is restored on exit. Terminals Spectre reports
+  as non-unicode get an ASCII spinner instead of the moon frames.
+
 ## [1.3.1] - 2026-07-09
 
 ### Fixed
@@ -113,6 +124,8 @@ Initial versioned release — the full tool, end to end.
   one-shot `rtfm init` machine bootstrap.
 - Cross-platform CI across Windows, macOS, and Linux.
 
+[1.3.2]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.3.2
+[1.3.1]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.3.1
 [1.3.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.3.0
 [1.2.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.2.0
 [1.1.0]: https://github.com/a7ex-turcan/rtfm/releases/tag/v1.1.0
