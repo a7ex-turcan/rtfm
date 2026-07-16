@@ -54,6 +54,8 @@ internal static class WatchCommand
             return resolveCode;
         }
 
+        var scope = DescribeScope(targets, all, project);
+
         using var embedder = await EmbedderProvider.TryCreateAsync().ConfigureAwait(false);
         var gateway = new OpenSearchGateway();
         var indexer = new DocumentIndexer(gateway);
@@ -79,7 +81,7 @@ internal static class WatchCommand
 
             if (Ui.Fancy)
             {
-                await RunDashboardAsync(targets, ingestor, ingestGate, cts.Token).ConfigureAwait(false);
+                await RunDashboardAsync(targets, scope, ingestor, ingestGate, cts.Token).ConfigureAwait(false);
             }
             else
             {
@@ -160,6 +162,22 @@ internal static class WatchCommand
         return targets.Count == 0 ? ([], 1) : (targets, 0);
     }
 
+    /// <summary>
+    /// A short human label for the terminal-title / dashboard: "all" for an
+    /// unfiltered <c>--all</c>, the project name when everything is one project,
+    /// else "N projects".
+    /// </summary>
+    private static string DescribeScope(IReadOnlyList<Target> targets, bool all, string? project)
+    {
+        var projects = targets.Select(t => t.Project).Distinct(StringComparer.Ordinal).ToList();
+        if (all && project is null)
+        {
+            return "all";
+        }
+
+        return projects.Count == 1 ? projects[0] : $"{projects.Count} projects";
+    }
+
     private static void PrintUsage()
     {
         Console.Error.WriteLine("usage: rtfm watch <folder...> [--project <name>]");
@@ -183,9 +201,16 @@ internal static class WatchCommand
 
     /// <summary>The Phase 7 live view: header + counters + a scrolling event feed, now spanning N folders.</summary>
     private static async Task RunDashboardAsync(
-        IReadOnlyList<Target> targets, DocumentIngestor ingestor, SemaphoreSlim? ingestGate, CancellationToken cancellationToken)
+        IReadOnlyList<Target> targets, string scope, DocumentIngestor ingestor, SemaphoreSlim? ingestGate, CancellationToken cancellationToken)
     {
         var state = new DashboardState(targets.Select(t => (t.Folder, t.Project)).ToList());
+
+        // Animated terminal-tab title, e.g. "🌒 watching all". Driven from the
+        // same lock as the Live repaint below so the two stderr writers never
+        // interleave. Disposed → prior title restored.
+        using var title = new TerminalTitle();
+        var titleFrame = 0;
+        title.Reconciling($"watching {scope}");
 
         await Ui.Err.Live(state.Render())
             .AutoClear(false)
@@ -197,6 +222,25 @@ internal static class WatchCommand
                     {
                         ctx.UpdateTarget(state.Render());
                         ctx.Refresh();
+                    }
+                }
+
+                // Title-only tick: spins the icon (or reflects "reconciling")
+                // without repainting the dashboard, so smooth animation costs no
+                // extra Live repaints — the tall repaint is what rang the --all
+                // bell, and the title escape doesn't touch the content region.
+                void TickTitle()
+                {
+                    lock (state)
+                    {
+                        if (state.Status == "watching")
+                        {
+                            title.Animate(titleFrame++, $"watching {scope}");
+                        }
+                        else
+                        {
+                            title.Reconciling($"watching {scope}");
+                        }
                     }
                 }
 
@@ -233,6 +277,23 @@ internal static class WatchCommand
                     }
                 }, CancellationToken.None);
 
+                // Faster, cheaper tick just for the animated tab title.
+                var titleTicker = Task.Run(async () =>
+                {
+                    try
+                    {
+                        while (!cancellationToken.IsCancellationRequested)
+                        {
+                            TickTitle();
+                            await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Shutting down.
+                    }
+                }, CancellationToken.None);
+
                 try
                 {
                     await Task.WhenAll(runs).ConfigureAwait(false);
@@ -246,6 +307,7 @@ internal static class WatchCommand
 
                     Refresh();
                     await ticker.ConfigureAwait(false);
+                    await titleTicker.ConfigureAwait(false);
                 }
             }).ConfigureAwait(false);
     }
@@ -270,6 +332,9 @@ internal static class WatchCommand
             _targets = targets;
             _multi = targets.Count > 1;
         }
+
+        /// <summary>Current lifecycle word ("reconciling…" / "watching" / "stopped"); read under lock(this).</summary>
+        public string Status => _status;
 
         /// <summary>The short attribution shown in the feed's Source column: folder leaf, prefixed by project when projects differ.</summary>
         public string LabelFor(string folder, string project)
