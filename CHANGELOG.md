@@ -14,6 +14,40 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.4.1] - 2026-07-16
+
+### Fixed
+- **A rolled-back write on a read-only SQL Server database is now reported as an
+  error, not a success.** 1.4.0 promised a write against a read-only `.rtfmdb`
+  would be "reported as an error, never as a silent success". The rollback half
+  worked — nothing ever persisted — but the reporting half didn't: `rtfm db query
+  <db> "CREATE TABLE …"` printed `OK — no rows returned` and `query_database`
+  returned `success: true`. An agent issuing DDL would conclude its write landed
+  when it hadn't, which is worse than a plain failure: it proceeds on a false
+  belief about the database.
+
+  The cause was a bad signal. The read guard decided "was this a write?" from
+  `RecordsAffected > 0`, but DDL reports `-1` there — exactly like a `SELECT`
+  does — so `CREATE`/`DROP`/`ALTER` fell through to the success path. `INSERT`
+  reports `1` and *was* caught correctly, which is why the guard looked right
+  when it was first validated: the check only ever exercised DML.
+
+  A read-mode statement is now treated as a confirmed read only if it came back
+  **with a result set**; anything else is reported as rolled back, naming
+  `allowWrites` as the way out. This over-reports the rare read-ish statement
+  that returns nothing (a bare `PRINT`/`SET`), costing one retry, and
+  under-reports nothing. RTFM still never inspects your SQL string.
+
+  **Postgres was unaffected** — its `25006` comes from the engine as a real
+  error, so it never had a reporting half to get wrong. Both the CLI (non-zero
+  exit) and `query_database` (`success: false`) now surface the failure.
+
+### Changed
+- Nothing in the read guard's *behavior* changed: writes were rejected before
+  this release and are rejected after it. If you relied on a read-only
+  descriptor reporting success for a `CREATE`/`DROP` that never actually
+  happened, that reply was the bug.
+
 ## [1.4.0] - 2026-07-16
 
 ### Added

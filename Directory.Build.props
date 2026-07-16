@@ -7,9 +7,14 @@
     versions, and the MCP server's advertised `serverInfo.version`.
 
     Bump deliberately (semver): patch for fixes, minor for additive phases,
-    major for a breaking change to the CLI/MCP contract. When you bump, also
-    update the version badge literal in README.md (a static shields.io badge is
-    the one spot the version cannot read from here).
+    major for a breaking change to the CLI/MCP contract. When you bump, two
+    other spots must move with it — neither can read the version from here:
+      1. the version badge literal in README.md (a static shields.io badge), and
+      2. a matching "## [x.y.z]" section in CHANGELOG.md.
+    (2) is enforced *late*: release.yml packs and pushes to nuget.org before it
+    extracts the changelog, so a missing section fails the run only after the
+    packages are permanently published — leaving a released version with no
+    GitHub Release. Write the section before you tag, not after.
   -->
   <PropertyGroup>
     <Version>1.4.1</Version>
