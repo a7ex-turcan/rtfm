@@ -104,4 +104,56 @@ public class DatabaseQueryTests
         Assert.Equal("schema only", refused.Error);
         Assert.Empty(refused.Rows);
     }
+
+    // The SQL Server read guard's *reporting* half (§2.15: rolled back, and said so).
+    // The rollback itself is live-only; what the caller is told afterwards is pure.
+
+    [Fact]
+    public void Read_only_ddl_is_reported_as_an_error_not_a_silent_success()
+    {
+        // Regression: `CREATE TABLE` rolls back, but reports RecordsAffected = -1 —
+        // exactly like a SELECT — so a rows-affected check returned "OK, no rows"
+        // and an agent concluded its DDL had landed.
+        var rolledBack = DatabaseQueryService.EvaluateSqlServerReadOutcome(
+            DbQueryResult.Ok(columns: [], rows: [], truncated: false), affected: -1);
+
+        Assert.False(rolledBack.Success);
+        Assert.Contains("read-only", rolledBack.Error);
+        Assert.Contains("rolled back", rolledBack.Error);
+        Assert.Contains("allowWrites", rolledBack.Error);   // names the way out
+    }
+
+    [Fact]
+    public void Read_only_write_reports_the_rows_it_undid()
+    {
+        var rolledBack = DatabaseQueryService.EvaluateSqlServerReadOutcome(
+            DbQueryResult.Ok(columns: [], rows: [], truncated: false), affected: 3);
+
+        Assert.False(rolledBack.Success);
+        Assert.Contains("3 row(s)", rolledBack.Error);
+        Assert.Contains("nothing persisted", rolledBack.Error);
+        Assert.Contains("allowWrites", rolledBack.Error);
+    }
+
+    [Fact]
+    public void Read_only_select_passes_through_untouched()
+    {
+        var read = DbQueryResult.Ok(columns: ["id"], rows: [["1"]], truncated: true);
+
+        var outcome = DatabaseQueryService.EvaluateSqlServerReadOutcome(read, affected: -1);
+
+        Assert.True(outcome.Success);
+        Assert.Same(read, outcome);      // a read is reported verbatim, truncation flag intact
+    }
+
+    [Fact]
+    public void Read_only_select_matching_no_rows_is_still_a_read()
+    {
+        // A result set with zero rows is a read; only the *absence* of a result set
+        // means the statement could not be confirmed as one.
+        var outcome = DatabaseQueryService.EvaluateSqlServerReadOutcome(
+            DbQueryResult.Ok(columns: ["id"], rows: [], truncated: false), affected: 0);
+
+        Assert.True(outcome.Success);
+    }
 }

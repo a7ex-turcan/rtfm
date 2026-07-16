@@ -28,7 +28,13 @@ library-local rules.
   *database*: `SET TRANSACTION READ ONLY` (Postgres) or a transaction that is
   always rolled back (SQL Server, which has no read-only mode but does have
   transactional DDL). Two invariants: a `.rtfmdb` without a `query` block stays
-  un-queryable, and one without `allowWrites` stays read-only. Never "harden" it
+  un-queryable, and one without `allowWrites` stays read-only. **Rolling back is
+  only half the guarantee — the undo must also be *reported* as an error.** Don't
+  judge that by `RecordsAffected`: DDL reports `-1` there exactly like a SELECT,
+  which is how a rolled-back `CREATE TABLE` once returned "OK — no rows returned"
+  while the agent concluded it had written (fixed in
+  `EvaluateSqlServerReadOutcome`: a read is confirmed by a *result set* coming
+  back, never by rows-affected). Never "harden" it
   by pattern-matching the SQL string — CTEs, `SELECT INTO`, side-effecting
   functions, and stacked statements walk past that, so it reads as protection
   while being none. And never gate on login permissions: a local dev box is

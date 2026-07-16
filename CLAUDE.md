@@ -1402,10 +1402,31 @@ transport hit EOF instantly and shut down while handlers are still running —
 responses are dropped and stdout looks empty. Hold the pipe open
 (`( cat requests; sleep 12 ) | dotnet rtfm-mcp.dll`). A harness artifact, not
 a server bug: real clients keep stdin open.
-**Open:** the SQL Server path (read-mode rollback + write mode) is implemented
-but live-validated only for Postgres — same asymmetry Phase 20 left. The
-rollback guard leans on SQL Server's transactional DDL, which is true but
-unexercised here; run it against a real MSSQL box when one is handy.
+**SQL Server live-validated (2026-07-16) — and the "Open" asymmetry was hiding
+a real bug.** Run against a throwaway SQL Server 2022 as `sa`, the rollback
+guard held exactly as designed (DDL *is* transactional; nothing persisted), but
+the **reporting** half was broken: read-mode outcomes keyed off
+`DbDataReader.RecordsAffected > 0`, and **DDL reports `-1` there exactly like a
+SELECT does** — so a rolled-back `CREATE TABLE` came back as "OK — no rows
+returned" / `success: true`. Precisely the silent success §2.15 forbids, and
+worse than a failure: the agent proceeds believing it wrote. `INSERT` reports
+`1` and *was* caught, which is why the guard looked correct when it was first
+validated — the DML probe couldn't see the DDL hole. Fixed in
+`EvaluateSqlServerReadOutcome` (a pure seam, unit-tested): a read-mode statement
+is a confirmed read only if it **came back with a result set**; no result set ⇒
+reported as rolled back. That over-reports a bare `PRINT`/`SET` (one wasted
+agent retry) and under-reports nothing. Known residual: a batch that selects
+first and writes later (`SELECT 1; CREATE TABLE …`) still reports the read —
+closing it needs SQL parsing (defeated by CTEs/stacked statements, §2.15) or a
+VIEW SERVER STATE DMV (the login-permission trap this phase already learned).
+**Postgres was correct all along** — 25006 comes from the engine as a real
+`DbException`, so it never had a reporting half to get wrong.
+*The generalizable lesson:* the rollback and the report are two independent
+halves of one guarantee, and a live probe that only exercises DML proves only
+half. Verified end-to-end afterwards on both surfaces (CLI exit 1 + MCP
+`success:false`, stdout pure JSON-RPC), with the DB itself as ground truth: the
+read-only `CREATE`/`INSERT`/`DROP` left no trace, while an `allowWrites`
+descriptor's `CREATE`/`INSERT` both landed.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

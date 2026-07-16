@@ -29,9 +29,13 @@ namespace Rtfm.Core.Database;
 /// for the tool's actual audience.</item>
 /// </list>
 /// <para>
-/// In read mode a statement that <i>did</i> modify rows is reported as an error
-/// naming the rollback, never as a silent success — an agent told "ok, 0 rows"
-/// after its INSERT was undone would believe it wrote.
+/// In read mode the rollback is only half the guard: the outcome must also be
+/// <i>reported</i> as an error, never as a silent success — an agent told "ok, 0
+/// rows" after its write was undone would believe it wrote. On SQL Server that
+/// judgement is <see cref="EvaluateSqlServerReadOutcome"/>, which keys off whether
+/// a result set came back rather than off rows-affected (DDL reports -1 there just
+/// like a SELECT, which is how a rolled-back CREATE TABLE once reported as OK).
+/// Postgres needs none of this: the engine refuses the write outright.
 /// </para>
 /// String-level filtering of the SQL is deliberately <i>not</i> attempted — CTEs,
 /// <c>SELECT INTO</c>, side-effecting functions, and stacked statements all walk
@@ -184,13 +188,51 @@ public sealed class DatabaseQueryService
 
         await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
 
-        // Report the undo. Silently returning "success, 0 rows" would let an agent
-        // believe its INSERT landed.
-        return affected > 0
-            ? DbQueryResult.Failed(
-                $"This database is read-only: the statement modified {affected} row(s) and was rolled back. "
-                + "Add \"allowWrites\": true to the descriptor's query block to permit writes.")
-            : result;
+        return EvaluateSqlServerReadOutcome(result, affected);
+    }
+
+    /// <summary>
+    /// Decides what a read-mode SQL Server caller is told once the rollback has run.
+    /// The statement already executed and was undone; the only question left is
+    /// whether it was a read (report the rows) or a write (report the undo).
+    /// <para>
+    /// A statement counts as a confirmed read only if it came back <b>with a result
+    /// set</b>. <see cref="DbDataReader.RecordsAffected"/> alone is not enough:
+    /// DDL (CREATE/DROP/ALTER) reports <c>-1</c> there exactly like a SELECT does,
+    /// so keying off rows-affected let a rolled-back <c>CREATE TABLE</c> report as
+    /// "OK — no rows returned" while nothing had persisted.
+    /// </para>
+    /// <para>
+    /// So anything with no result set is reported as rolled back rather than assumed
+    /// harmless. That over-reports the rare read-ish statement that returns nothing
+    /// (a bare <c>PRINT</c>/<c>SET</c>), which costs an agent one retry — while the
+    /// opposite error leaves it believing a write landed. Note this never inspects
+    /// the SQL string (§2.15): it reads only what the engine reported about the
+    /// statement it actually ran. <b>Known limit:</b> a batch whose first statement
+    /// selects and whose later statement writes (<c>SELECT 1; CREATE TABLE …</c>)
+    /// still reports the read — closing that needs either SQL parsing (defeated by
+    /// CTEs and stacked statements) or a DMV requiring VIEW SERVER STATE (refuses
+    /// the non-sa logins this tool exists to serve).
+    /// </para>
+    /// </summary>
+    internal static DbQueryResult EvaluateSqlServerReadOutcome(DbQueryResult result, int affected)
+    {
+        if (affected > 0)
+        {
+            return DbQueryResult.Failed(
+                $"This database is read-only: the statement modified {affected} row(s) and was rolled back — nothing persisted. "
+                + "Add \"allowWrites\": true to the descriptor's query block to permit writes.");
+        }
+
+        if (result.Columns.Count == 0)
+        {
+            return DbQueryResult.Failed(
+                "This database is read-only: the statement returned no result set, so it could not be confirmed as a read, "
+                + "and it was rolled back — nothing persisted. Statements such as CREATE, DROP and ALTER report no rows even "
+                + "when they change the database. Add \"allowWrites\": true to the descriptor's query block to permit writes.");
+        }
+
+        return result;
     }
 
     /// <summary>
