@@ -5,7 +5,8 @@
 
 A local, per-developer documentation retrieval tool. It indexes a folder of
 documentation — Confluence MHTML exports (`.doc`), Word `.docx`, plain
-Markdown (`.md`), PDF, Excel (`.xlsx`), CSV, and draw.io diagrams — into a
+Markdown (`.md`), PDF, Excel (`.xlsx`), CSV, draw.io diagrams, and exported
+email chains — into a
 local OpenSearch instance and exposes it to any
 MCP-capable LLM client (Claude Code, Claude Desktop, IDE integrations) over a
 stdio MCP server. Instead of manually attaching docs to a chat, a developer asks
@@ -158,6 +159,9 @@ the extension lies (a `.doc` that is really MHTML, or really bare HTML).
 Detection order (content first; MHTML *before* HTML, since MHTML also wraps
 HTML):
 - zip magic `PK\x03\x04` → **docx**
+- MIME headers **plus conversational headers** (`From:`/`To:`/`Subject:`/`Date:`)
+  → **email** (Phase 24 — must be tested *before* the MHTML rule, which a `.eml`
+  file would otherwise match; see that phase's note)
 - MIME headers (`MIME-Version:` / `multipart/related`) → **MHTML**
 - `<!doctype html>` / `<html>` (or `.html`/`.htm` extension) → **bare HTML**
 - otherwise, `.md` extension → **markdown passthrough**
@@ -498,6 +502,7 @@ as a decision rather than treated as one more tool:
 | OCR for PDF-embedded images (Phase 16) + standalone images (Phase 17) | `RapidOcrNet` (PP-OCRv5 via ONNX Runtime; models in-package) + SkiaSharp |
 | SQL schema files (Phase 18) | none — built-in dialect-tolerant DDL scanner |
 | Live DB schema pull (Phase 20) | `Microsoft.Data.SqlClient` + `Npgsql` via INFORMATION_SCHEMA |
+| Email (`.eml`, `.mbox`) → markdown (Phase 24) | `MimeKit` (already shipped for MHTML) — quote/signature strip is hand-rolled |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -1427,6 +1432,147 @@ half. Verified end-to-end afterwards on both surfaces (CLI exit 1 + MCP
 `success:false`, stdout pure JSON-RPC), with the DB itself as ground truth: the
 read-only `CREATE`/`INSERT`/`DROP` left no trace, while an `allowWrites`
 descriptor's `CREATE`/`INSERT` both landed.
+
+### Phase 24 — Email chains (`.eml`, `.mbox`) ✅ **Done**
+Decisions get made in threads and never make it back into Confluence. An
+exported chain is often the only record that `admin` became `super-admin` — and
+unlike every other input, each message carries a **real author and a real
+`Date:` header**, so §2.13's recency reasoning finally has trustworthy input
+(the current corpus is exports that share mtimes, which is why Phase 22's
+supersession labeling finds nothing real to label).
+
+**The parser is nearly free; the chunking is the whole phase.** MimeKit already
+does MIME + quoted-printable for the MHTML route (§2.5), so `.eml` is the same
+library and the same strip→ReverseMarkdown tail. Build the format first only to
+get to the two problems that actually decide quality:
+
+- **Thread = document, message = chunk.** Email has no headings, so
+  `MarkdownChunker` would degrade to blind paragraph windows and breadcrumbs
+  would collapse. Synthesize the hierarchy from thread structure instead:
+  breadcrumb `<subject> > <date> <sender>`. This is the Phase 15/18 granularity
+  lesson a third time — per-message chunks beat one thread-shaped blob, and a
+  question about what was decided in message 7 should hit message 7.
+- **Quote-stripping is load-bearing, not polish.** Reply #8 quotes messages
+  #1–7 inline, so a naive index stores the first message ~8 times. That is
+  precisely the contradiction detector's nomination signature (near-identical
+  text, different dates, §2.13), and **Phase 22's template suppression will not
+  save us** — it keys on content repeated across ≥3 *documents*, while this is
+  one document duplicating itself. Strip `>` prefixes,
+  `-----Original Message-----`, `On <date>, X wrote:`, and `<blockquote>` in
+  the HTML part.
+- **Signature/disclaimer stripping, after de-quoting.** (The plan had this
+  backwards: it assumed quoted senders' signatures would survive as orphaned
+  fragments and had to be cut first. They don't — quote-stripping cuts from the
+  first boundary to the *end* of the body, disposing of the quoted history
+  wholesale, so the signature pass only ever sees the author's own trailer.)
+  Targets:
+  the RFC 3676 `-- ` delimiter (reliable when present, and Outlook usually
+  omits it, so it can't be the only rule), corporate legal disclaimer blocks
+  (the worst offender — 80+ words appended to *every* message), `Sent from my
+  iPhone`-class footers, and a trailing-contact-block heuristic (a run of short
+  lines that are mostly phone numbers, URLs, and titles, with a name matching
+  `From:`). Tracking pixels and logo bugs are already free — Phase 16's icon
+  filter skips anything under 80 px on the short side.
+- **Not built now:** corpus-frequency signature detection. Phase 22's
+  `line_hashes` would identify signature blocks *empirically* (the same 6 lines
+  under every message from one person is definitionally repeated content), but
+  it needs a second pass over an already-indexed corpus, and the deterministic
+  rules should get ~90% there. Same "don't pre-build it" posture as §2.5's Open
+  XML table fallback — revisit only if real exports prove messier.
+- **`.msg` (Outlook CFB) is out of scope** for this phase; it needs a separate
+  container library. Drag-drop to `.eml` is the documented workaround.
+- **Privacy is explicitly the user's problem** — consistent with §intro (per-dev
+  local tool) and §2.14 (the user chooses what to index). No opt-in gesture, no
+  content gating. Sanitization here is about *retrieval quality*, not secrecy.
+
+> **`.eml` collides with the MHTML sniffer — MHTML *is* an email container.**
+> §2.5's detection routes on `MIME-Version:` / `multipart/related`, which a
+> `.eml` file matches happily, so email would silently ride the Confluence
+> route and convert as a malformed web page. The signal that separates them:
+> a real message carries `From:` + `To:` + `Subject:` + `Date:` headers and is
+> usually `multipart/alternative` or `multipart/mixed`, while a Confluence
+> export is `multipart/related` with `Content-Location` parts and no
+> conversational headers. **Check for message headers before the MHTML rule**,
+> and keep a fixture of each so the two can never re-cross.
+
+**Done when:** a 10-message exported thread yields ~10 chunks (not ~55), each
+breadcrumbed by subject + date + sender; a question about a decision made
+mid-thread hits that message's own chunk; signatures and legal disclaimers do
+not appear in retrieved text; and indexing a thread produces zero
+self-duplication nominations in `rtfm contradictions`.
+
+*Delivered:* `EmailConverter` (a §2.5 front end — no tail change) +
+`EmailSanitizer` (the quote/signature passes as an `internal static` seam, unit
+-tested as pure string logic). MimeKit was already shipped for MHTML, so **no
+new dependency and no §3 pin**: `MimeMessage.Load` for `.eml`, `MimeParser` with
+`MimeFormat.Mbox` for `.mbox`. A file becomes one document, each message a
+`## <date> <sender>` section under the subject's `#`, so the existing chunker
+yields one chunk per message with the `subject > date > sender` breadcrumb —
+**no chunker change**. Plain text is preferred over HTML (it quote-strips far
+more reliably); HTML-only messages route through the shared tail first, where
+ReverseMarkdown renders `blockquote` as `>` and the same text passes then apply.
+Body lines starting with `#` are escaped — unescaped, one would be read as a
+heading and shatter the per-message structure. Thread title strips `Re:`/`Fwd:`
+prefixes; `SourceModifiedAt` is the newest message (per §2.15-style scoping
+decision: per-message dates would need a chunk-level contract change, and the
+case that drives §2.13 is thread-vs-document recency — contradiction detection
+excludes same-document pairs anyway).
+
+**Two findings the plan got wrong, both caught live:**
+- **512 bytes is not enough to sniff email.** `FormatDetector` peeked 512
+  bytes; the real corpus's `.eml` carries a `Received:`/`DKIM-Signature` chain
+  that puts `Subject:` at **byte 1540**. The email rule now reads an 8 KB
+  header window — *only* that rule, because widening it for every rule would
+  let a stray `<html` deep inside a CSV beat its own extension. The peek also
+  moved to `ReadAtLeast`: a single `Read` may return short and would truncate
+  the window arbitrarily.
+- **The email rule is ordered before MHTML and separates on recipients.**
+  Requiring `From:` **and** `To:`/`Cc:` together is what distinguishes a message
+  from a Confluence export (which has a `Subject:` and a `Date:` but no
+  recipients). Anything ambiguous falls through to MHTML — the pre-Phase-24
+  behavior. Both directions are pinned by tests.
+
+**Known limitation — a lone `.eml` loses its history.** Quote-stripping assumes
+the chain was exported *per message*, so each message exists as its own file.
+If a user exports only the final reply, the earlier messages are discarded with
+the quotes. `.mbox` is the better container for a whole thread. Not worked
+around: reconstructing messages from quoted text would reintroduce exactly the
+cross-document duplication the strip exists to prevent.
+
+**Validated:** unit fixtures for both containers, every quote-boundary dialect
+(`On … wrote:` including the two-line wrap, `-----Original Message-----`,
+Outlook's `From:/Sent:/To:` block, `____` divider), and the sanitizer's
+non-actions (a plain "Thanks,\nAlex" sign-off survives; a `From:` line that
+opens a sentence is not a boundary). Live: a three-message thread exported
+per-message → 3 docs / 3 chunks with exact `subject > date > sender`
+breadcrumbs; "what is the default user role for a new tenant" ranks the newer
+`super-admin` correction #1 (1.00) with the stale `admin` claim still retrieved
+at #2 — §2.13 B working as designed, conflict visible rather than hidden. Every
+other format in the real corpus re-detects unchanged (4 Mhtml, 1 Html, 4
+Drawio, 2 Sql, 1 Pdf). The corpus turned out to **already contain a real
+`.eml`** (a PMM permissions thread), which converts cleanly and preserves the
+inline "Answered by <name>:" annotations — the tribal knowledge that motivated
+the phase. 211/211 tests.
+
+**Open — contradiction detection does not reach email, and floor-tuning is not
+the fix.** Two measurements, both against the 0.75 nomination floor:
+- *Message vs message* — the planted `admin` vs `super-admin` disagreement
+  scored **0.7242**. Marginal; conversational text scores structurally lower
+  than statement-to-statement prose, the same effect Phase 22 measured for
+  notes (floor lowered 0.6 → 0.45 *on evidence*).
+- *Message vs schema* — the real corpus email states that PMM's
+  `PartyExtension.Value` is `nvarchar(max)` while noting the schema export shows
+  `varchar(0)`; a genuine, already-known disagreement with `PMM_rev.sql`. Best
+  similarity to any schema chunk: **0.5267** — and it *was* the right table
+  (`dbo.PartyExtension`, ranked above its siblings), so relative ranking holds
+  while the absolute scale collapses. Same shape as the Phase 15 drawio finding.
+
+So a single global floor cannot serve both prose-vs-prose and prose-vs-schema:
+0.53 would nominate essentially everything. Dropping the floor to catch either
+case would regress the precision work Phase 22 just finished on the same corpus.
+Left unnominated deliberately. If this is worth closing later, the lever is
+per-pair-type floors or a different comparison basis — **not** one lower number.
+Retrieval is unaffected: `search_docs` answers the same question at 1.00.
 
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness

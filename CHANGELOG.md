@@ -14,6 +14,51 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.5.0] - 2026-07-20
+
+### Added
+- **Exported email chains are now indexable (`.eml`, `.mbox`).** Decisions get
+  made in threads and never make it back into Confluence, and unlike every other
+  input a message carries a real author and a real `Date:` header. A file becomes
+  one document and each message its own section under the subject, so search hits
+  arrive breadcrumbed as `subject > date > sender` and a question about a decision
+  made mid-thread lands on that message rather than the whole chain. No new
+  dependency — MimeKit already shipped for the Confluence MHTML route.
+
+  Quoted reply history, signatures, legal disclaimers, and mobile footers are
+  stripped before indexing. This is not cosmetic: a chain exported per message
+  carries its first message quoted inside every later reply, so indexing raw
+  bodies would store the same text once per reply and bury real answers under
+  copies of the question.
+
+### Changed
+- **Format detection reads an 8 KB header window for email**, up from the 512
+  bytes used for every other format. A real message's `Received:`/`DKIM-Signature`
+  chain routinely pushes `Subject:` past 512 bytes — in the corpus this was
+  developed against, byte 1540. The wider window applies only to the email rule,
+  so a stray `<html` deep inside a CSV still loses to that file's extension.
+- Email is detected ahead of MHTML and separated from it by the presence of
+  recipients. MHTML is itself a MIME email container, so without the ordering a
+  `.eml` would route through the Confluence converter and convert as a malformed
+  page. Anything ambiguous still falls through to MHTML, unchanged.
+
+### Known limitations
+- Quote-stripping assumes a chain exported **per message**, one file each. A lone
+  `.eml` holding only the final reply loses the earlier messages along with the
+  quotes — use `.mbox` for a whole thread in one file. Reconstructing messages
+  from quoted text is deliberately not attempted; it would reintroduce exactly
+  the duplication the stripping exists to prevent.
+- Outlook's native `.msg` (a CFB container, not MIME) is not supported. Save or
+  drag the message as `.eml`.
+- Contradiction detection does not reach email content. Measured against the
+  0.75 nomination floor: message-vs-message similarity for a genuine
+  `admin`/`super-admin` disagreement scores 0.7242, and message-vs-SQL-schema for
+  a real, known disagreement scores 0.5267 — the latter correctly identifying the
+  right table, so ranking holds while the absolute scale collapses. A single
+  lower floor cannot serve both and would regress 1.3.x's nomination precision,
+  so nothing was tuned. Retrieval is unaffected: `search_docs` answers these
+  questions at full score.
+
 ## [1.4.1] - 2026-07-16
 
 ### Fixed

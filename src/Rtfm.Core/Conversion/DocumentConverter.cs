@@ -18,6 +18,7 @@ public sealed class DocumentConverter
     private readonly ImageConverter _image = new();
     private readonly SqlConverter _sql = new();
     private readonly DatabaseSchemaConverter _database = new();
+    private readonly EmailConverter _email = new();
 
     /// <summary>Converts the file at <paramref name="path"/> to markdown.</summary>
     public ConversionResult Convert(string path)
@@ -47,6 +48,7 @@ public sealed class DocumentConverter
             SourceFormat.Image => _image.Convert(stream, path),
             SourceFormat.Sql => _sql.Convert(stream, path),
             SourceFormat.Database => _database.Convert(stream, path),
+            SourceFormat.Email => _email.Convert(stream, path),
             _ => throw new NotSupportedException(
                 $"Unrecognized document format: {path}"),
         };

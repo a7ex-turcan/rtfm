@@ -45,4 +45,11 @@ public enum SourceFormat
 
     /// <summary>Live database schema via a .rtfmdb connector descriptor (Phase 20).</summary>
     Database,
+
+    /// <summary>
+    /// Exported email chain (.eml, .mbox). Phase 24. Shares MHTML's MIME
+    /// container — MHTML *is* an email format — so detection separates them by
+    /// conversational headers, and the email rule must be tested first.
+    /// </summary>
+    Email,
 }

@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Rtfm.Core.Conversion;
 
@@ -11,9 +12,18 @@ namespace Rtfm.Core.Conversion;
 /// zips — so zips are disambiguated by their container folder
 /// (<c>word/</c> vs <c>xl/</c>).
 /// </summary>
-public static class FormatDetector
+public static partial class FormatDetector
 {
     private const int PeekBytes = 512;
+
+    /// <summary>
+    /// Email needs a longer look than the other formats: a real message's
+    /// <c>Received:</c> chain routinely runs past 512 bytes before
+    /// <c>Subject:</c> appears. Only the email rule reads this far — widening
+    /// the window for every rule would let a stray <c>&lt;html</c> deep inside
+    /// a CSV win over its extension.
+    /// </summary>
+    private const int HeaderPeekBytes = 8192;
 
     /// <summary>
     /// Sniffs <paramref name="stream"/> without consuming it — the stream
@@ -22,10 +32,13 @@ public static class FormatDetector
     public static SourceFormat Detect(string path, Stream stream)
     {
         var origin = stream.Position;
-        var buffer = new byte[PeekBytes];
-        var read = stream.Read(buffer, 0, buffer.Length);
+        var buffer = new byte[HeaderPeekBytes];
+        // ReadAtLeast, not Read: a single Read may return short even with more
+        // to come, which would truncate the header window arbitrarily.
+        var total = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
         stream.Position = origin;
 
+        var read = Math.Min(total, PeekBytes);
         var head = buffer.AsSpan(0, read);
 
         // PDF: "%PDF".
@@ -51,8 +64,28 @@ public static class FormatDetector
             return DetectOoxml(stream, origin);
         }
 
-        // MHTML: MIME headers appear near the top of the file.
         var text = Encoding.ASCII.GetString(head);
+
+        // Email — MUST be tested before MHTML, which it would otherwise match:
+        // MHTML *is* a MIME email container, so a .eml would silently route
+        // through the Confluence converter and convert as a malformed page.
+        // What separates them is conversational headers — a Confluence export
+        // has no recipients — so require From: and To: together. Anything
+        // ambiguous falls through to MHTML, i.e. the pre-Phase-24 behavior.
+        var headerText = Encoding.ASCII.GetString(buffer, 0, total);
+        var ext = Path.GetExtension(path);
+
+        if (ext.Equals(".eml", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".mbox", StringComparison.OrdinalIgnoreCase)
+            || headerText.StartsWith("From ", StringComparison.Ordinal)
+            || (FromHeader().IsMatch(headerText)
+                && ToHeader().IsMatch(headerText)
+                && SubjectOrDateHeader().IsMatch(headerText)))
+        {
+            return SourceFormat.Email;
+        }
+
+        // MHTML: MIME headers appear near the top of the file.
         if (text.Contains("MIME-Version:", StringComparison.OrdinalIgnoreCase)
             || text.Contains("multipart/related", StringComparison.OrdinalIgnoreCase))
         {
@@ -74,7 +107,6 @@ public static class FormatDetector
             return SourceFormat.Html;
         }
 
-        var ext = Path.GetExtension(path);
         if (ext.Equals(".md", StringComparison.OrdinalIgnoreCase)
             || ext.Equals(".markdown", StringComparison.OrdinalIgnoreCase))
         {
@@ -150,4 +182,13 @@ public static class FormatDetector
             stream.Position = origin;
         }
     }
+
+    [GeneratedRegex(@"^From:\s*\S", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex FromHeader();
+
+    [GeneratedRegex(@"^(To|Cc):\s*\S", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex ToHeader();
+
+    [GeneratedRegex(@"^(Subject|Date|Message-ID):\s*\S", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex SubjectOrDateHeader();
 }

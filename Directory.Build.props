@@ -17,7 +17,7 @@
     GitHub Release. Write the section before you tag, not after.
   -->
   <PropertyGroup>
-    <Version>1.4.1</Version>
+    <Version>1.5.0</Version>
     <Product>RTFM</Product>
     <Authors>Alex</Authors>
 
