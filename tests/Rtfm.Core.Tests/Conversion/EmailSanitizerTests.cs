@@ -64,6 +64,102 @@ public class EmailSanitizerTests
         Assert.Equal(body, EmailSanitizer.StripQuotedHistory(body));
     }
 
+    // --- SplitThread: the .eml path, where boundaries divide rather than cut ---
+
+    [Fact]
+    public void Splits_an_outlook_thread_into_one_segment_per_message()
+    {
+        var body =
+            "Latest reply.\n\n" +
+            "________________________________\n" +
+            "From: Anil Yedla <anil@corp.example>\n" +
+            "Sent: Friday, July 17, 2026 7:46 PM\n" +
+            "To: Alex <alex@corp.example>\n" +
+            "Subject: Re: Region routing\n\n" +
+            "Middle message.\n\n" +
+            "From: Nikhil Gupta <nikhil@corp.example>\n" +
+            "Date: Thursday, July 16, 2026 at 11:54\n" +
+            "To: Anil <anil@corp.example>\n\n" +
+            "Oldest message.";
+
+        var segments = EmailSanitizer.SplitThread(body);
+
+        Assert.Equal(3, segments.Count);
+
+        // Newest first, as written; the caller reverses for reading order.
+        Assert.Null(segments[0].Sender);                       // top: caller fills from MIME headers
+        Assert.Equal("Latest reply.", segments[0].Body);
+
+        Assert.Equal("Anil Yedla", segments[1].Sender);
+        Assert.Equal(2026, segments[1].Date!.Value.Year);
+        Assert.Equal(7, segments[1].Date!.Value.Month);
+        Assert.Equal(17, segments[1].Date!.Value.Day);
+        Assert.Equal("Middle message.", segments[1].Body);
+
+        Assert.Equal("Nikhil Gupta", segments[2].Sender);      // the "Date:" dialect
+        Assert.Equal(16, segments[2].Date!.Value.Day);
+        Assert.Equal("Oldest message.", segments[2].Body);
+    }
+
+    [Fact]
+    public void Splits_a_gmail_attribution_thread()
+    {
+        var body =
+            "My reply.\n\n" +
+            "On Fri, 13 Mar 2026 17:02:00, Bob Jones <bob@corp.example> wrote:\n" +
+            "> The original question.\n" +
+            "> Second line of it.";
+
+        var segments = EmailSanitizer.SplitThread(body);
+
+        Assert.Equal(2, segments.Count);
+        Assert.Equal("My reply.", segments[0].Body);
+        Assert.Equal("Bob Jones", segments[1].Sender);
+        Assert.Contains("The original question.", segments[1].Body);
+        Assert.Contains("Second line of it.", segments[1].Body);
+    }
+
+    [Fact]
+    public void A_single_message_body_yields_exactly_one_segment()
+    {
+        var segments = EmailSanitizer.SplitThread("Just one message, no history.");
+
+        Assert.Single(segments);
+        Assert.Null(segments[0].Sender);
+        Assert.Equal("Just one message, no history.", segments[0].Body);
+    }
+
+    [Fact]
+    public void Split_segments_still_lose_their_signatures()
+    {
+        var body =
+            "Reply text.\n\n" +
+            "--\n" +
+            "Alex | Corp Ltd\n\n" +
+            "________________________________\n" +
+            "From: Bob Jones <bob@corp.example>\n" +
+            "Sent: Friday, July 17, 2026 7:46 PM\n\n" +
+            "Older text.\n\n" +
+            "--\n" +
+            "Bob | Corp Ltd";
+
+        var segments = EmailSanitizer.SplitThread(body);
+
+        Assert.Equal("Reply text.", segments[0].Body);
+        Assert.Equal("Older text.", segments[1].Body);
+    }
+
+    [Fact]
+    public void Prose_beginning_with_from_does_not_split_the_thread()
+    {
+        // No Sent:/Date: follows, so this is a sentence, not a header block.
+        var body = "From: the design review we learned two things.\nBoth are written up.";
+
+        Assert.Single(EmailSanitizer.SplitThread(body));
+    }
+
+    // --- StripQuotedHistory: the .mbox path, where siblings hold the history ---
+
     [Theory]
     [InlineData("--")]
     [InlineData("-- ")]

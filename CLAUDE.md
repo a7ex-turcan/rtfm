@@ -1532,12 +1532,49 @@ excludes same-document pairs anyway).
   recipients). Anything ambiguous falls through to MHTML — the pre-Phase-24
   behavior. Both directions are pinned by tests.
 
-**Known limitation — a lone `.eml` loses its history.** Quote-stripping assumes
-the chain was exported *per message*, so each message exists as its own file.
-If a user exports only the final reply, the earlier messages are discarded with
-the quotes. `.mbox` is the better container for a whole thread. Not worked
-around: reconstructing messages from quoted text would reintroduce exactly the
-cross-document duplication the strip exists to prevent.
+**Corrected in 1.5.1 — quote-stripping is per-container, and `.eml` splits.**
+1.5.0 shipped a documented "known limitation": a lone `.eml` lost its history,
+on the assumption that chains are exported per message. **That assumption was
+wrong for the actual export habit** — Outlook's "Save as" writes the *whole
+thread* into one `.eml`, so stripping the quotes deleted every message but the
+newest. The real corpus thread grew from 2 indexed chunks to **1** as replies
+were added: appending a reply shrank the indexed content, which is exactly
+backwards. The rule is now container-specific, and the distinction is the whole
+fix:
+- **`.eml` = one MIME message.** Its quoted history is the *only* copy of the
+  earlier thread in the file, so `EmailSanitizer.SplitThread` divides at the
+  boundaries and keeps every segment, oldest first, attributed by the sender and
+  date its inline header block declares. Quoting in a threaded body is linear,
+  not repetitive — each message appears exactly once — so splitting duplicates
+  nothing.
+- **`.mbox` = many MIME messages.** Siblings already hold those messages, so the
+  quoted copy really is redundant and `StripQuotedHistory` still removes it. Not
+  stripping here would index a ten-message chain's first message ten times.
+
+Real exports use two Outlook dialects, sometimes in the same file: a
+`________` divider + `From:`/`Sent:`, and a bare `From:`/`Date:` with no
+divider — and **no `>` prefixes at all**, so `>`-based detection alone would
+have found nothing. A bare `From:` only counts as a boundary when a
+`Sent:`/`Date:` follows within a few lines, which keeps prose ("From: the design
+review we learned…") from splitting a message. Gmail's `On … wrote:` + `>`
+form is handled too. Dates parse from both `Friday, July 17, 2026 7:46 PM` and
+`Friday, July 17, 2026 at 03:24` (the ` at ` defeats `TryParse` and is
+normalized away). Per-message dates ride the breadcrumb; `source_modified_at`
+remains the thread's newest date, unchanged.
+
+> **Contract moved (per `tests/CLAUDE.md`).** 1.5.0's
+> `Drops_quoted_history_signature_and_contact_block` asserted that a `.eml`'s
+> quoted history was absent. That expectation was the bug, and the test was
+> deliberately inverted to
+> `Eml_keeps_quoted_history_as_its_own_message_section`. Signature/disclaimer
+> stripping is unchanged and still applies **per segment**.
+
+**Remaining limitation:** if the same thread is exported more than once as it
+grows (two files, different names, overlapping messages), the shared messages
+are indexed from both. Content loss is strictly worse than duplication, so this
+is the right trade — and Phase 22's `line_hashes` suppression already covers
+the contradiction-nomination half once copies span ≥3 docs. Outlook's native
+`.msg` (CFB, not MIME) remains unsupported.
 
 **Validated:** unit fixtures for both containers, every quote-boundary dialect
 (`On … wrote:` including the two-line wrap, `-----Original Message-----`,

@@ -14,6 +14,53 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.5.1] - 2026-07-20
+
+### Fixed
+- **A threaded `.eml` no longer loses every message but the newest.** 1.5.0
+  stripped quoted reply history from all email, on the assumption that chains
+  are exported one message per file — so the quoted copy would be redundant with
+  a sibling. That assumption was wrong for how exports are actually produced:
+  Outlook's "Save as" writes the *whole thread* into a single `.eml`, so the
+  strip deleted the thread and kept only the top reply. An 11-message thread
+  indexed as one chunk containing a two-line reply, and adding a reply *shrank*
+  the indexed content — backwards, and it silently hid answers that were in the
+  file the whole time.
+
+  Quote handling is now per container, which is the actual fix rather than a
+  reversal:
+  - **`.eml` is one MIME message**, so its quoted history is the only copy of
+    the earlier thread in the file. It is split at the message boundaries and
+    every segment is kept, oldest first, attributed by the sender and date of
+    the inline header block that introduced it. Each message becomes its own
+    breadcrumbed, retrievable chunk. Quoting in a threaded body is linear rather
+    than repetitive — each message appears exactly once — so splitting
+    duplicates nothing.
+  - **`.mbox` holds every message separately**, so the quoted copy really is
+    redundant with its siblings and stripping remains correct there. Without it
+    a ten-message chain would index its first message ten times.
+
+  This supersedes the "a lone `.eml` loses its history" limitation listed under
+  1.5.0, which described the defect rather than a constraint.
+
+  Real exports carry two Outlook separator dialects, sometimes in one file: a
+  `________` divider with `From:`/`Sent:`, and a bare `From:`/`Date:` with no
+  divider — and **no `>` prefixes at all**, so detection based on those alone
+  found nothing. A bare `From:` counts as a boundary only when a `Sent:`/`Date:`
+  follows within a few lines, so prose opening with "From:" does not split a
+  message. Gmail's `On … wrote:` form is handled as well. Signature and
+  disclaimer stripping is unchanged and now applies per message.
+
+  `source_modified_at` still tracks the thread's newest date; per-message dates
+  appear in the breadcrumb.
+
+### Known limitations
+- Exporting the same thread more than once as it grows (two filenames with
+  overlapping messages) indexes the shared messages from both files. Content
+  loss is strictly worse than duplication, so this trade is deliberate.
+- Outlook's native `.msg` (a CFB container, not MIME) is still unsupported.
+  Save or drag the message as `.eml`.
+
 ## [1.5.0] - 2026-07-20
 
 ### Added

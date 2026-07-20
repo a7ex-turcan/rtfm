@@ -110,19 +110,99 @@ public class EmailConverterTests
         Assert.Contains("super-admin", result.Markdown);
     }
 
+    /// <summary>
+    /// The 1.5.1 correctness contract, and the inverse of what 1.5.0 asserted:
+    /// a .eml holds one MIME message, so its quoted history is the *only* copy
+    /// of the earlier thread in the file. Dropping it loses those messages —
+    /// the reported bug, where an 11-message chain indexed as its newest reply.
+    /// </summary>
     [Fact]
-    public void Drops_quoted_history_signature_and_contact_block()
+    public void Eml_keeps_quoted_history_as_its_own_message_section()
     {
         var markdown = Convert(SampleEml, "thread.eml").Markdown;
 
-        Assert.DoesNotContain("Is the default role still admin?", markdown);
-        Assert.DoesNotContain("wrote:", markdown);
+        Assert.Contains("Is the default role still admin?", markdown);
+        Assert.Contains("## 2026-03-13 Bob Jones", markdown);
+        Assert.Contains("## 2026-03-14 Alice Smith", markdown);
+
+        // Oldest first: the quoted original precedes the reply that quoted it.
+        Assert.True(
+            markdown.IndexOf("Is the default role still admin?", StringComparison.Ordinal)
+            < markdown.IndexOf("super-admin", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Drops_signature_and_contact_block_from_every_message()
+    {
+        var markdown = Convert(SampleEml, "thread.eml").Markdown;
+
         Assert.DoesNotContain("Head of Platform", markdown);
         Assert.DoesNotContain("+44 20 7946", markdown);
-        Assert.DoesNotContain("corp.example", markdown);
+        Assert.DoesNotContain("wrote:", markdown);
 
         // A plain sign-off is not a signature block and must survive.
         Assert.Contains("Thanks,", markdown);
+    }
+
+    /// <summary>
+    /// The real corpus thread uses Outlook's two dialects in one file: a
+    /// "____" divider + From:/Sent:, and a bare From:/Date: with no divider.
+    /// Neither uses "&gt;" prefixes at all.
+    /// </summary>
+    [Fact]
+    public void Recovers_every_message_from_an_outlook_threaded_export()
+    {
+        const string OutlookThread =
+            "From: Alexandru Turcan <alex@corp.example>\r\n" +
+            "To: Anil Yedla <anil@corp.example>\r\n" +
+            "Subject: Re: Region routing\r\n" +
+            "Date: Mon, 20 Jul 2026 08:30:16 +0000\r\n" +
+            "MIME-Version: 1.0\r\n" +
+            "Content-Type: text/plain; charset=utf-8\r\n" +
+            "\r\n" +
+            "We'll go with Option 1.\r\n" +
+            "\r\n" +
+            "________________________________\r\n" +
+            "From: Anil Yedla <anil@corp.example>\r\n" +
+            "Sent: Friday, July 17, 2026 7:46 PM\r\n" +
+            "To: Alexandru Turcan <alex@corp.example>\r\n" +
+            "Subject: Re: Region routing\r\n" +
+            "\r\n" +
+            "Option A resolves region from a global source.\r\n" +
+            "\r\n" +
+            "From: Nikhil Gupta <nikhil@corp.example>\r\n" +
+            "Date: Thursday, July 16, 2026 at 11:54\r\n" +
+            "To: Anil Yedla <anil@corp.example>\r\n" +
+            "\r\n" +
+            "Hasura getRegion is region based.\r\n";
+
+        var result = Convert(OutlookThread, "thread.eml");
+
+        // Every message survives, oldest first, each attributed.
+        Assert.Contains("## 2026-07-16 Nikhil Gupta", result.Markdown);
+        Assert.Contains("## 2026-07-17 Anil Yedla", result.Markdown);
+        Assert.Contains("## 2026-07-20 Alexandru Turcan", result.Markdown);
+
+        Assert.Contains("Hasura getRegion is region based.", result.Markdown);
+        Assert.Contains("Option A resolves region from a global source.", result.Markdown);
+        Assert.Contains("We'll go with Option 1.", result.Markdown);
+
+        // The divider belongs to the boundary, not to the message above it.
+        Assert.DoesNotContain("____", result.Markdown);
+        Assert.DoesNotContain("Sent:", result.Markdown);
+    }
+
+    [Fact]
+    public void An_eml_thread_chunks_one_message_per_unit()
+    {
+        var result = Convert(SampleEml, "thread.eml");
+        var chunks = new MarkdownChunker().Chunk(
+            result.Markdown,
+            new ChunkMetadata("thread.eml", result.Title, result.SourceModifiedAt));
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Equal("Bundle pricing > 2026-03-13 Bob Jones", chunks[0].HeadingPath);
+        Assert.Equal("Bundle pricing > 2026-03-14 Alice Smith", chunks[1].HeadingPath);
     }
 
     [Fact]

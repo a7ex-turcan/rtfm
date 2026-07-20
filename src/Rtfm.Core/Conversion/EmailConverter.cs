@@ -26,7 +26,8 @@ public sealed partial class EmailConverter
 
     public ConversionResult Convert(Stream input, string sourcePath)
     {
-        var messages = Load(input, sourcePath);
+        var isMbox = IsMbox(input, sourcePath);
+        var messages = Load(input, sourcePath, isMbox);
         if (messages.Count == 0)
         {
             throw new InvalidDataException($"No email messages found in: {sourcePath}");
@@ -40,16 +41,13 @@ public sealed partial class EmailConverter
 
         foreach (var message in messages)
         {
-            markdown.Append("## ")
-                .Append(message.Date.UtcDateTime.ToString("yyyy-MM-dd"))
-                .Append(' ')
-                .Append(SenderName(message))
-                .Append("\n\n");
-
-            var body = CleanBody(message);
-            if (body.Length > 0)
+            foreach (var (heading, body) in Sections(message, isMbox))
             {
-                markdown.Append(body).Append("\n\n");
+                markdown.Append("## ").Append(heading).Append("\n\n");
+                if (body.Length > 0)
+                {
+                    markdown.Append(body).Append("\n\n");
+                }
             }
         }
 
@@ -69,11 +67,11 @@ public sealed partial class EmailConverter
     /// single message. Both parse through MimeKit, already shipped for the
     /// MHTML route.
     /// </summary>
-    private static List<MimeMessage> Load(Stream input, string sourcePath)
+    private static List<MimeMessage> Load(Stream input, string sourcePath, bool isMbox)
     {
         var messages = new List<MimeMessage>();
 
-        if (IsMbox(input, sourcePath))
+        if (isMbox)
         {
             var parser = new MimeParser(input, MimeFormat.Mbox);
             while (!parser.IsEndOfStream)
@@ -110,29 +108,65 @@ public sealed partial class EmailConverter
     }
 
     /// <summary>
-    /// Plain text is preferred over HTML: it quote-strips far more reliably,
-    /// and multipart/alternative almost always carries it. HTML-only messages
-    /// route through the shared tail first — ReverseMarkdown renders
-    /// <c>blockquote</c> as <c>&gt;</c>, so the same text passes then apply.
+    /// One <c>## heading</c> + body per message.
+    ///
+    /// For <c>.eml</c> the quoted history *is* the rest of the thread — the
+    /// file holds one MIME message and every earlier reply lives inside its
+    /// body — so it is split into segments and all of them are kept, oldest
+    /// first. For <c>.mbox</c> the siblings already carry those messages, so
+    /// the quoted copy is redundant and gets stripped instead. Getting this
+    /// backwards for <c>.eml</c> was the 1.5.0 bug: an 11-message thread
+    /// indexed as its newest reply alone.
     /// </summary>
-    private string CleanBody(MimeMessage message)
+    private IEnumerable<(string Heading, string Body)> Sections(MimeMessage message, bool isMbox)
     {
-        var raw = message.TextBody;
-
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            var html = message.HtmlBody;
-            raw = string.IsNullOrWhiteSpace(html) ? string.Empty : _html.Convert(html).Markdown;
-        }
+        var raw = BodyText(message);
+        var topHeading = $"{message.Date.UtcDateTime:yyyy-MM-dd} {SenderName(message)}";
 
         if (raw.Length == 0)
         {
-            return string.Empty;
+            yield return (topHeading, string.Empty);
+            yield break;
         }
 
-        var body = EmailSanitizer.StripQuotedHistory(raw);
-        body = EmailSanitizer.StripSignature(body);
-        return Demote(body);
+        if (isMbox)
+        {
+            yield return (topHeading, Demote(
+                EmailSanitizer.StripSignature(EmailSanitizer.StripQuotedHistory(raw))));
+            yield break;
+        }
+
+        // Exports run newest-first; reverse so the thread reads oldest-first
+        // and chunk ordinals follow the conversation.
+        var segments = EmailSanitizer.SplitThread(raw).Reverse().ToList();
+
+        foreach (var segment in segments)
+        {
+            var heading = segment.Sender is null
+                ? topHeading
+                : $"{segment.Date?.UtcDateTime.ToString("yyyy-MM-dd") ?? "undated"} {segment.Sender}";
+
+            yield return (heading, Demote(segment.Body));
+        }
+    }
+
+    /// <summary>
+    /// Plain text is preferred over HTML: its message boundaries survive far
+    /// more reliably, and multipart/alternative almost always carries it.
+    /// HTML-only messages route through the shared tail first — ReverseMarkdown
+    /// renders <c>blockquote</c> as <c>&gt;</c>, so the same passes then apply.
+    /// </summary>
+    private string BodyText(MimeMessage message)
+    {
+        var raw = message.TextBody;
+
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            return raw;
+        }
+
+        var html = message.HtmlBody;
+        return string.IsNullOrWhiteSpace(html) ? string.Empty : _html.Convert(html).Markdown;
     }
 
     /// <summary>
