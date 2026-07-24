@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rtfm.Core.Confluence;
 using Rtfm.Core.Indexing;
 using Rtfm.Core.Jira;
 using Rtfm.Core.Manifest;
@@ -47,8 +48,10 @@ internal static class PurgeCommand
         var manifests = ManifestStore.FindManifests(project).Count;
         var jiraConfigured = JiraConfigStore.Load(project) is not null;
         var jiraMonitored = JiraMonitorStore.Load(project).Count;
+        var confluenceConfigured = ConfluenceConfigStore.Load(project) is not null;
+        var confluenceMonitored = ConfluenceMonitorStore.Load(project).Count;
 
-        if (chunks == 0 && manifests == 0 && !jiraConfigured && jiraMonitored == 0)
+        if (chunks == 0 && manifests == 0 && !jiraConfigured && jiraMonitored == 0 && !confluenceConfigured && confluenceMonitored == 0)
         {
             Ui.Err.MarkupLine($"Nothing indexed under project [{Ui.Accent}]{Ui.E(project)}[/] — nothing to purge.");
             return 0;
@@ -58,6 +61,7 @@ internal static class PurgeCommand
             $"Project [{Ui.Accent}]{Ui.E(project)}[/]: [bold]{chunks}[/] chunks across [bold]{docs}[/] docs, "
             + $"[bold]{manifests}[/] watch manifest{(manifests == 1 ? "" : "s")}"
             + (jiraConfigured || jiraMonitored > 0 ? $", [bold]Jira[/] config{(jiraMonitored > 0 ? $" + {jiraMonitored} monitored ticket(s)" : "")}" : "")
+            + (confluenceConfigured || confluenceMonitored > 0 ? $", [bold]Confluence[/] config{(confluenceMonitored > 0 ? $" + {confluenceMonitored} monitored page(s)" : "")}" : "")
             + ".");
 
         if (!yes)
@@ -86,10 +90,12 @@ internal static class PurgeCommand
         var removedPairs = await new Rtfm.Core.Contradictions.ContradictionDetector(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
         var removedNotes = await new Rtfm.Core.Notes.NotesStore(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
 
-        // Jira chunks carry the project keyword, so they were already deleted
-        // above; drop the connector config + monitored set so nothing lingers.
+        // Jira/Confluence chunks carry the project keyword, so they were already
+        // deleted above; drop the connector configs + monitored sets so nothing lingers.
         var removedJiraConfig = JiraConfigStore.Remove(project);
         var removedJiraMonitor = JiraMonitorStore.Remove(project);
+        var removedConfluenceConfig = ConfluenceConfigStore.Remove(project);
+        var removedConfluenceMonitor = ConfluenceMonitorStore.Remove(project);
 
         Ui.Err.MarkupLine(
             $"[green]Purged[/] project [{Ui.Accent}]{Ui.E(project)}[/]: "
@@ -97,6 +103,7 @@ internal static class PurgeCommand
             + $"[bold]{removedPairs}[/] contradiction pair{(removedPairs == 1 ? "" : "s")} dropped, "
             + $"[bold]{removedNotes}[/] note{(removedNotes == 1 ? "" : "s")} removed"
             + (removedJiraConfig || removedJiraMonitor ? ", [bold]Jira[/] config + monitor removed" : "")
+            + (removedConfluenceConfig || removedConfluenceMonitor ? ", [bold]Confluence[/] config + monitor removed" : "")
             + ".");
         return 0;
     }
