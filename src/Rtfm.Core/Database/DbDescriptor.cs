@@ -1,5 +1,5 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using Rtfm.Core.Configuration;
 
 namespace Rtfm.Core.Database;
 
@@ -81,9 +81,7 @@ internal sealed record DbDescriptor(
 
     /// <summary>Replaces <c>${VAR}</c> with the environment value; missing vars fail loudly (a half-expanded secret is worse).</summary>
     internal static string ExpandEnvironment(string value)
-        => Regex.Replace(value, @"\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}", m =>
-            Environment.GetEnvironmentVariable(m.Groups["name"].Value)
-            ?? throw new InvalidDataException($"environment variable '{m.Groups["name"].Value}' referenced by the .rtfmdb descriptor is not set"));
+        => EnvironmentExpansion.Expand(value, ".rtfmdb descriptor");
 }
 
 /// <summary>

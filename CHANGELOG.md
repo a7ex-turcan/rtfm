@@ -14,6 +14,35 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.6.0] - 2026-07-24
+
+### Added
+- **Jira integration — the first source RTFM pulls over an authenticated API**
+  (`rtfm jira`, read-only by construction). Instead of manually exporting
+  tickets, point RTFM at a Jira Cloud workspace and index by key:
+  - `rtfm jira config --url <workspace> --email <you> [--token-env JIRA_TOKEN]`
+    stores a per-project descriptor (URL + email + a `${ENV}` reference to the
+    API token — the token itself lives only in the environment) and verifies
+    auth with a read-only check.
+  - `rtfm jira index <KEY>` pulls the ticket **and follows its links** — issue
+    links, parent, subtasks, and epic children — breadth-first to `--depth`
+    (default 2), bounded by a `--max-tickets` budget (dropped links are
+    reported, never silent) with a visited-set guarding circular references.
+    Each ticket is indexed as thread-granular chunks (description + one chunk
+    per comment, breadcrumb `KEY: summary > Comment by author, date`) under the
+    source key `jira://KEY`, carrying the ticket's real `updated` date and
+    authors. `--follow-mentions` also chases `KEY-123` mentions in the seed's
+    text (validated against real project keys); `--dry-run` previews the crawl
+    plan without indexing.
+  - `rtfm jira watch [--interval <s>] [--once]` polls the monitored set and
+    re-indexes any ticket whose `updated` changed; the first poll after a
+    restart catches up on anything changed while it was off.
+  - `rtfm jira purge <KEY> | --all` drops a ticket (or all of them) from the
+    index and the monitored set. `rtfm purge <project>` now also clears a
+    project's Jira config and monitored set.
+  - **Read-only, always:** the Jira client issues `GET` and nothing else —
+    RTFM is a retrieval tool and never writes to a team's tracker.
+
 ## [1.5.1] - 2026-07-20
 
 ### Fixed

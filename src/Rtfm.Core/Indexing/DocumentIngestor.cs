@@ -67,7 +67,7 @@ public sealed class DocumentIngestor
     /// count. If the file yields no chunks (e.g. it became empty), any prior
     /// chunks are removed so nothing stale is left behind.
     /// </summary>
-    public async Task<int> IngestFileAsync(string path, string project, DateTimeOffset indexedAt, CancellationToken cancellationToken = default)
+    public Task<int> IngestFileAsync(string path, string project, DateTimeOffset indexedAt, CancellationToken cancellationToken = default)
     {
         var conversion = _converter.Convert(path);
         var sourcePath = PathNormalizer.Normalize(path);
@@ -75,7 +75,38 @@ public sealed class DocumentIngestor
             ?? new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero);
 
         var metadata = new ChunkMetadata(sourcePath, conversion.Title, modifiedAt, project);
-        var chunks = _chunker.Chunk(conversion.Markdown, metadata);
+        return IngestMarkdownAsync(metadata, conversion.Markdown, indexedAt, cancellationToken);
+    }
+
+    /// <summary>
+    /// Ingests an already-converted markdown document that has no file on disk —
+    /// the Jira ticket path (§2.16). <paramref name="sourceKey"/> is the caller's
+    /// canonical key (e.g. <c>jira://AEXP-123</c> from <see cref="Jira.JiraSource"/>)
+    /// and is used verbatim as the <c>source_path</c>; it must <b>not</b> be run
+    /// through <see cref="PathNormalizer"/> (its <c>Path.GetFullPath</c> would
+    /// mangle the URI). <paramref name="modifiedAt"/> is required — a synthetic
+    /// document has no file mtime to fall back to.
+    /// </summary>
+    public Task<int> IngestDocumentAsync(
+        string sourceKey,
+        string markdown,
+        string? title,
+        DateTimeOffset modifiedAt,
+        string project,
+        DateTimeOffset indexedAt,
+        CancellationToken cancellationToken = default)
+    {
+        var metadata = new ChunkMetadata(sourceKey, title, modifiedAt, project);
+        return IngestMarkdownAsync(metadata, markdown, indexedAt, cancellationToken);
+    }
+
+    // The shared convert-agnostic tail: chunk → embed → index → contradiction
+    // pass. Both the file route and the Jira route funnel through here so they
+    // agree on embedding, the source-key delete semantics, and detection.
+    private async Task<int> IngestMarkdownAsync(ChunkMetadata metadata, string markdown, DateTimeOffset indexedAt, CancellationToken cancellationToken)
+    {
+        var sourcePath = metadata.SourcePath;
+        var chunks = _chunker.Chunk(markdown, metadata);
 
         if (chunks.Count == 0)
         {

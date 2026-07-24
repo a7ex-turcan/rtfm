@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.5.1-FF8C00" alt="version 1.5.1">
+  <img src="https://img.shields.io/badge/version-1.6.0-FF8C00" alt="version 1.6.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -315,6 +315,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm contradictions` | `[--project <name>]`                                                                                | Nominated disagreements between documents of the same project: semantically-similar passages with different source dates and differing text (e.g. an old page says the default role is `admin`, a newer one `super-admin`). Nominations, not verdicts — read both sides before trusting either.                                                                                                                                                                                                                                                                                                                     |
 | `rtfm note`           | `add <text> [--project] [--doc <path>] \| list \| rm <id>`                                          | Override notes: user-confirmed corrections that live outside the document index and **survive every re-index**. They surface in search as attributed ⚠ overrides and annotate the documents they correct — the original text stays retrievable.                                                                                                                                                                                                                                                                                                                                                                     |
 | `rtfm db`             | `list [--project <name>]` &nbsp;or&nbsp; `query <name> "<sql>" [--project <name>] [--max-rows <n>]` | The live-data gateway. `list` shows the `.rtfmdb` connectors found in your indexed folders and each one's access (schema-only / read-only / read+write); `query` runs SQL against one and prints the rows. Only descriptors carrying a `query` block are queryable, and they're read-only unless the block sets `allowWrites`. Results are capped (default 500 rows) and say so when truncated.                                                                                                                                                                                                                     |
+| `rtfm jira`           | `config --url <ws> --email <you> [--token-env <VAR>] [--project <name>]` &nbsp;·&nbsp; `index <ISSUE-KEY> [--project <name>] [--depth <n>] [--max-tickets <n>] [--follow-mentions] [--dry-run]` &nbsp;·&nbsp; `watch [--project <name>] [--interval <s>] [--once]` &nbsp;·&nbsp; `purge <ISSUE-KEY>\|--all [--project <name>] [--yes]` &nbsp;·&nbsp; `list`                   | Pull Jira tickets over the Cloud REST API and index them (**read-only** — `rtfm` never writes to Jira). `config` stores a per-project workspace descriptor (URL + email + a `${ENV}` reference to your API token, expanded at call time — the token itself lives only in the environment) and verifies auth. `index <KEY>` pulls the ticket **and follows its links** — issue links, parent, subtasks, and epic children — breadth-first to `--depth` (default 2), bounded by a `--max-tickets` budget (dropped links are reported), and indexes each into `--project` as thread-granular chunks (description + one chunk per comment, breadcrumb `KEY: summary > Comment by author, date`), under source keys `jira://KEY`. `--follow-mentions` also chases `KEY-123` mentions in the seed's text; `--dry-run` previews the crawl plan without indexing. Every indexed ticket joins the project's **monitored set**. `watch` polls Jira on an interval (`--interval <s>`, default from config; `--once` for a single pass) and re-indexes any monitored ticket whose `updated` changed — the first poll after a restart catches up on anything changed while it was off. `purge` drops one ticket (or `--all`) from the index and the monitored set. `list` shows configured workspaces. |
 | `rtfm purge`          | `<project> [--yes]`                                                                                 | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                                                                                                                                                                                                                                                                               |
 | `rtfm convert`        | `<path>`                                                                                            | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `rtfm chunk`          | `<path>`                                                                                            | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -348,6 +349,89 @@ nothing breaks.
 | `RTFM_PROJECT`        | Default project scope for the MCP server (per-call `project` argument overrides; `*` = all)                                                                          |
 | `RTFM_MODEL_DIR`      | Embedding-model cache override (e.g. an offline pre-provisioned copy)                                                                                                |
 | `RTFM_GENERATED_DIR`  | Where `save_document` stores agent-generated docs (default `LocalApplicationData/rtfm/generated`; point it at a committed folder to get generated analyses reviewed) |
+
+## Indexing Jira tickets
+
+Besides files in a folder, RTFM can pull tickets straight from a Jira Cloud
+workspace over its REST API and index them like any other document. This is
+**read-only** — RTFM only ever issues `GET`, and has no code path that writes to
+your tracker.
+
+**1. Create a Jira API token.** At
+[id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens),
+click *Create API token*, and copy it.
+
+**2. Put the token in an environment variable.** RTFM never stores the token —
+its config keeps only a *reference* to an env var (default `JIRA_TOKEN`), which
+it expands at call time. Set it so every shell that runs `rtfm` can see it:
+
+```bash
+# macOS / Linux — add to ~/.zshrc or ~/.bashrc to persist:
+export JIRA_TOKEN='paste-your-token-here'
+```
+
+```powershell
+# Windows PowerShell — persist for future sessions:
+setx JIRA_TOKEN "paste-your-token-here"
+# (reopen the terminal so the new value is picked up)
+```
+
+**3. Configure the workspace** (once per project). Point RTFM at your
+workspace URL and the email of the account the token belongs to. The tickets
+you index will belong to the `--project` you name here (the same projects used
+everywhere else):
+
+```bash
+rtfm jira config \
+  --url https://your-company.atlassian.net \
+  --email you@your-company.com \
+  --project myproject
+```
+
+This verifies the credentials immediately (a read-only `GET /myself`) and saves
+the descriptor under `LocalApplicationData/rtfm/jira/`. Optional flags set the
+defaults for later `index`/`watch` runs: `--max-depth <n>` (link-follow depth,
+default 2), `--max-tickets <n>` (crawl budget, default 150), `--poll <seconds>`
+(watch interval, default 300), `--follow-mentions`, and `--token-env <VAR>` if
+you'd rather name a different environment variable than `JIRA_TOKEN`.
+
+**4. Index a ticket — and everything it links to.**
+
+```bash
+# One ticket:
+rtfm jira index PROJ-123 --project myproject
+
+# An epic pulls its stories too — follow links breadth-first, but preview first:
+rtfm jira index PROJ-100 --project myproject --dry-run       # show the crawl plan
+rtfm jira index PROJ-100 --project myproject --depth 2       # then actually index
+```
+
+The crawl follows issue links, parent, subtasks, and epic children, bounded by
+the depth and ticket-budget caps (anything the budget cuts is reported, not
+silently dropped). Each ticket becomes thread-granular chunks — the description
+plus one chunk per comment — carrying the ticket's real author and `updated`
+date. They're now searchable exactly like your other docs, including from your
+LLM client via `search_docs`.
+
+**5. Keep them fresh.** Every indexed ticket joins the project's *monitored
+set*. `watch` polls Jira on an interval and re-indexes any ticket whose
+`updated` changed:
+
+```bash
+rtfm jira watch --project myproject            # runs until Ctrl+C
+rtfm jira watch --project myproject --once     # a single poll (e.g. from cron)
+```
+
+**6. Stop monitoring / clean up.**
+
+```bash
+rtfm jira purge PROJ-123 --project myproject   # drop one ticket
+rtfm jira purge --all --project myproject       # drop every Jira ticket in the project
+```
+
+> **Tip.** Because `.mcp.json` sets `RTFM_PROJECT` per repo, an agent working in
+> that repo searches its Jira tickets alongside its docs automatically — ask it
+> "what was decided on PROJ-123?" and the answer comes from the indexed thread.
 
 ## Supported formats & how they're read
 
