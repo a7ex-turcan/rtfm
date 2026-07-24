@@ -48,6 +48,9 @@ switch (args[0])
     case "db":
         return await DbCommand.RunAsync(args[1..]);
 
+    case "jira":
+        return await JiraCommand.RunAsync(args[1..]);
+
     case "note":
         return await NoteCommand.RunAsync(args[1..]);
 
@@ -118,6 +121,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project]] [[--closed]] | dismiss <id> | resolve <id> --note <text>[/]", "Doc-vs-doc disagreements: list, dismiss, or resolve into an override note");
     commands.AddRow($"[{Ui.Accent}]note[/] [dim]add <text>|list|rm <id> [[--project]] [[--doc <path>]][/]", "Override notes: corrections that survive re-indexing");
     commands.AddRow($"[{Ui.Accent}]db[/] [dim]list | query <name> \"<sql>\" [[--project]] [[--max-rows <n>]][/]", "Live DB gateway: list .rtfmdb connectors, run read-only queries");
+    commands.AddRow($"[{Ui.Accent}]jira[/] [dim]config | index <KEY> | watch | purge <KEY>|--all | list[/]", "Pull Jira tickets over the API and index them (read-only); watch polls for changes");
     commands.AddRow($"[{Ui.Accent}]purge[/] [dim]<project> [[--yes]][/]", "Remove a project's chunks and watch manifests (asks first)");
     commands.AddRow($"[{Ui.Accent}]mcp-config[/] [dim]--client <name> [[--project <name>]][/]", "Print an MCP config snippet for a client (cursor, vscode, zed, …)");
     commands.AddRow($"[{Ui.Accent}]convert[/] [dim]<path>[/]", "Convert one document to markdown (stdout)");

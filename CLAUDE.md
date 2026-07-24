@@ -482,6 +482,68 @@ as a decision rather than treated as one more tool:
   precondition (the folder was indexed) is already met by having the schema
   searchable at all.
 
+### 2.16 Live issue-tracker pull (Jira) — reversing the "no API pull" stance
+Every ingestion route so far is a *file* a human dropped in a folder. Phase 25
+adds the first source RTFM reaches out and pulls over an authenticated API: a
+Jira ticket, on demand (`rtfm jira index AEXP-123`). Phase 24 explicitly
+deferred "Confluence API pull (auth/token/rate-limit sprawl)"; this is the same
+class of thing, so reversing that for Jira is a decision, not a drive-by.
+
+- **Why reverse it now.** The pain the deferral accepted — manually exporting
+  and re-exporting docs — is *worst* for tickets: they change constantly, link
+  to each other, and the decisions in their comment threads (the `admin` →
+  `super-admin` kind) never make it back to Confluence. And a ticket carries
+  what §2.13 recency has been starving for: a **real per-item `updated` date**
+  and **real authors**, so supersession reasoning finally has trustworthy
+  input (the file corpus shares mtimes — Phase 22 found nothing real to label).
+- **It reads, only ever.** `JiraClient` issues `GET` and nothing else — there
+  is no create/update/delete method on it, by construction. This is the §2.15
+  read-guard lesson taken to its limit: the safest write guard is having no
+  write path at all. RTFM is a retrieval tool; it must never mutate a team's
+  tracker. (Load-bearing invariant, not a preference.)
+- **Fits the batch model (§2.4), does not become a live plane (§2.15).** Unlike
+  `query_database`, Jira tickets still land in the derived, disposable
+  `rtfm-docs` index — pull → convert → chunk → embed → index, the normal tail.
+  What's new is only the *front* of the pipe (an HTTP pull instead of a file
+  read) and that ingest is triggered by ticket key, not folder scan.
+- **Secrets: same discipline as `.rtfmdb`.** The stored config
+  (`LocalApplicationData/rtfm/jira/<project>.json`, written by `rtfm jira
+  config`, never committed) holds the workspace URL and account email (not
+  secret) plus a **`${ENV}` reference** to the API token, expanded lazily at
+  call time (shared `EnvironmentExpansion`, §2.15's `ResolveConnectionString`
+  pattern). The token itself lives only in the environment. Jira Cloud auth is
+  HTTP Basic `email:token`.
+- **Synthetic source key, deliberately *not* `PathNormalizer`.** A ticket has
+  no file path; its `source_path` is `jira://AEXP-123` (canonical upper-cased
+  key, built by `JiraSource.Key`). This must **not** flow through
+  `PathNormalizer` — it calls `Path.GetFullPath`, which would mangle the URI
+  into a filesystem path. `JiraSource.Key` is the Jira analog of the normalizer:
+  the one builder used identically on index and delete so exact-match
+  delete-by-query (§2.9) holds.
+- **Thread granularity, a fourth time (§§2.5, 15, 18, 24).** Ticket = document,
+  each comment = its own chunk. Breadcrumb `AEXP-123 <summary> > Comment by
+  <author>, <date>`, synthesized from ticket structure exactly as email
+  synthesizes it from thread structure — a question about what was decided in
+  comment 7 should hit comment 7's chunk. Description and comment bodies come
+  back from Jira as **rendered HTML** (`expand=renderedFields`; the raw fields
+  are Atlassian Document Format JSON), so they reuse the shared
+  strip→ReverseMarkdown tail with no new converter. (Comment *dates* in
+  `renderedFields` are display-formatted, so machine dates + authors are read
+  from the raw `fields.comment` and joined to rendered bodies by comment id.)
+- **Graph traversal is leashed (§Phase 25 step 2).** "Follow every linked
+  ticket" will try to eat the instance; three independent caps —
+  `maxDepth`, a hard `maxTickets` budget, and depth-degrading fidelity — bound
+  every run, a visited-set keys circular refs by ticket, and dropped work is
+  logged (no silent caps, §5). Text-mention edges (`AEXP-\d+` in prose) are
+  opt-in and only followed from the seed.
+- **Watch is a poll loop, not `FileSystemWatcher`.** An API has no filesystem
+  events; a separate `rtfm jira watch` re-pulls the monitored set on an
+  interval (`key in (…) AND updated >= <since>`). Kept a *separate* command
+  from `rtfm watch` on purpose — two different lifecycles (OS events vs.
+  polling) should not tangle. A monitored-set registry (manifest-shaped)
+  persists the *expanded* key set, and `rtfm jira purge` drops it so monitored
+  tickets don't pile up.
+
 ---
 
 ## 3. Tech stack / dependencies
@@ -503,6 +565,7 @@ as a decision rather than treated as one more tool:
 | SQL schema files (Phase 18) | none — built-in dialect-tolerant DDL scanner |
 | Live DB schema pull (Phase 20) | `Microsoft.Data.SqlClient` + `Npgsql` via INFORMATION_SCHEMA |
 | Email (`.eml`, `.mbox`) → markdown (Phase 24) | `MimeKit` (already shipped for MHTML) — quote/signature strip is hand-rolled |
+| Jira Cloud pull (Phase 25) | none — `HttpClient` (REST v3, Basic auth) + `System.Text.Json`; rendered-HTML fields reuse the ReverseMarkdown tail |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -1611,10 +1674,138 @@ Left unnominated deliberately. If this is worth closing later, the lever is
 per-pair-type floors or a different comparison basis — **not** one lower number.
 Retrieval is unaffected: `search_docs` answers the same question at 1.00.
 
+### Phase 25 — Jira integration: on-demand ticket pull + polling watch (§2.16) ✅ **Done**
+The first source RTFM *pulls* over an authenticated API rather than reading from
+a folder. A configured Jira workspace is pulled by ticket key, tickets and their
+linked neighbours are indexed into the current project as thread-granular chunks,
+and a poll loop keeps a monitored set fresh. The decision + safety model is
+§2.16; this phase is the build, in four verifiable steps (resist pulling later
+steps forward).
+
+- **Step 1 — `JiraClient` + config + index one ticket.** `rtfm jira config
+  --url <workspace> --email <you> [--token-env JIRA_TOKEN] [--project <name>]`
+  stores a per-project descriptor (URL + email + `${ENV}` token ref, §2.16) and
+  verifies auth via a read-only `GET /myself`. `rtfm jira index <KEY>` pulls the
+  ticket (`expand=renderedFields`), renders `# KEY: summary` + a metadata
+  blockquote + `## Description` + `## Comment by <author>, <date>` per comment
+  (rendered HTML → shared ReverseMarkdown tail; machine dates/authors from raw
+  `fields.comment`, joined by comment id), and ingests it under `source_path`
+  `jira://KEY` via a new markdown-string ingest path (`DocumentIngestor
+  .IngestDocumentAsync`, no file on disk). *Done when:* `rtfm jira index <KEY>`
+  indexes one ticket as breadcrumbed chunks (`KEY: summary > Comment by …`),
+  `source_modified_at` = the ticket's `updated`, and `search_docs` answers a
+  question about the ticket's content.
+- **Step 2 — graph traversal.** Follow structured issue links (and seed-only
+  `AEXP-\d+` text mentions when `--follow-mentions`) breadth-first to
+  `maxDepth`, bounded by the `maxTickets` budget with depth-degrading fidelity
+  (seed = full; deeper = description-only), circular refs killed by a visited
+  set, dropped work logged. `--dry-run` prints the expansion without indexing.
+  *Done when:* a seed in a dense neighbourhood indexes a bounded set, no
+  infinite loop, drop-count reported.
+- **Step 3 — monitored-set registry + `rtfm jira watch`.** Persist the expanded
+  key set + each ticket's last-pulled `updated` (manifest-shaped, per project);
+  poll `key in (monitored) AND updated >= <since>` on `pollSeconds`, re-index
+  deltas. Separate command from `rtfm watch` (poll vs. FileSystemWatcher, §2.16).
+  *Done when:* editing a monitored ticket in Jira is reflected within one poll
+  cycle.
+- **Step 4 — purge.** `rtfm jira purge <KEY> | --all [--project]`: stop
+  monitoring + delete-by-query the `jira://…` chunks + drop the registry entry,
+  so monitored tickets don't pile up. *Done when:* a purged ticket vanishes from
+  `search_docs` and stops being polled.
+
+Zero MCP-tool changes: once indexed, tickets are ordinary chunks that
+`search_docs` / `get_document` / contradiction detection already serve.
+
+*Step 1 delivered.* `Rtfm.Core/Jira/` — `JiraConfig` (+ `JiraConfigStore`,
+per-project descriptor under `LocalApplicationData/rtfm/jira`, `${ENV}` token
+ref resolved lazily via the shared `EnvironmentExpansion` extracted from
+`DbDescriptor`), `JiraClient` (read-only Cloud REST v3, Basic auth, `GET`-only
+by construction — `FetchIssueAsync` + a `/myself` `VerifyAuthAsync`; `internal`
+handler seam for tests), `JiraModels` (+ `JiraDate` for the colon-less zone
+offset), `JiraDocumentRenderer` (issue → thread-granular markdown; rendered-HTML
+description/comments reuse the `HtmlToMarkdownConverter` tail, comment headings
+escaped), and `JiraSource.Key` (the `jira://KEY` builder, the PathNormalizer
+analog that must skip `Path.GetFullPath`). Ingest via the new
+`DocumentIngestor.IngestDocumentAsync` (markdown-string path, no file on disk;
+the shared chunk→embed→index→detect tail was extracted so the file and Jira
+routes share it). CLI: `rtfm jira config|index|list`. Verified live against
+`internationalsos.atlassian.net`: `config` auth-checks read-only; `jira index
+TOD-3112` → 5 chunks under `jira://TOD-3112`, breadcrumb `TOD-3112: … > Comment
+by <author>, <date>`, `source_modified_at` = the ticket's `updated`, 100%
+embedded; `search` hits it #1 (1.00); **re-index stays 5 chunks** (the
+synthetic-key delete-by-query round-trips); `purge` removes all 5. 239 tests
+(20 new).
+
+*Step 2 delivered.* `JiraCrawler` (BFS from the seed, cycle-safe via a visited
+set, fetch-failures skipped-not-fatal) with the three-cap leash from §2.16:
+`maxDepth` (frontier tickets indexed but not expanded), a hard `maxTickets`
+budget (the remainder reported as `Dropped`, never silent — §5), and
+depth-degrading fidelity (`FetchIssueAsync(includeComments:)` — the seed pulls
+comments, deeper tickets are description-only). Edges: issue links + `parent` +
+`subtasks` from the issue fields, **epic/story children via a `parent = "KEY"`
+JQL search** (the finding — an epic's stories are not a field; `SearchIssueKeysAsync`
+paginates the new `/search/jql` `nextPageToken` endpoint), and — seed-only,
+opt-in (`--follow-mentions`) — `KEY-\d+` text mentions **validated against real
+project keys** (`FetchProjectKeysAsync`, so `UTF-8`/`SHA-256` don't 404-chase).
+CLI: `jira index <KEY> [--depth N] [--max-tickets N] [--follow-mentions]
+[--dry-run]` (flags override the stored config's defaults per run; `--dry-run`
+prints the crawl plan table + leash report without indexing or touching
+OpenSearch). Verified live on the real epic **AEXP-221**: `--dry-run --depth 1`
+previews exactly 13 tickets (epic + parent UNICORN-36 + 11 children); `--depth 2
+--max-tickets 15 --dry-run` hits the budget and reports "pulled 15, 9 more
+discovered but not followed" (depth-2 frontier reached cross-project links,
+cycle back to the epic handled); a real `--depth 1` indexed 13 tickets / 30
+chunks / 100% embedded and the *child* AEXP-222 ("PAM v1 DB assessment")
+answers a content query #1 (1.00). 243 tests (24 new).
+
+*Step 3 delivered.* The monitored-set registry + polling watch. `JiraMonitorStore`
+(per-project `JiraMonitor` of `MonitoredTicket{key, lastUpdated, full}` under
+`LocalApplicationData/rtfm/jira/monitor` — a subfolder so it never collides with
+the config files' hashed names); `jira index` records its crawled set there
+(fidelity preserved: only the depth-0 seed is `full`). `rtfm jira watch
+[--interval <s>] [--once]` polls: `JiraClient.FetchUpdatedAsync` batches
+`key in (…)` searches for each ticket's live `updated`, `JiraMonitor.SelectChanged`
+(pure, unit-tested) returns the keys whose live stamp is newer than stored (or
+never stamped; a key missing from the poll is left alone), and each is re-pulled
+at its stored fidelity → re-rendered → `IngestDocumentAsync` (delete-by-query
+replace) → its stamp updated. **Change detection is per-ticket `DateTimeOffset`
+comparison, not a JQL date literal** — timezone-proof and second-precise, and
+the first poll after a restart *is* the catch-up (compares against the stamps
+saved at index time). The monitor is reloaded each poll so a concurrent `jira
+index` is picked up without a restart; `--interval` floors at 30 s. Verified
+live: index (epic bounded to 4) → 4 monitored; `watch --once` → "polled 4 — no
+changes"; backdating one stored stamp (simulating a remote change without
+writing to Jira) → next poll re-indexes exactly that ticket; the poll after →
+"no changes". 246 tests (3 new).
+
+*Step 4 delivered (phase complete).* `rtfm jira purge <KEY> | --all [--project]
+[--yes]`: a single key deletes just that ticket's chunks (delete-by-query
+scoped to `source_path` **and** `project`, so a ticket shared with another
+project isn't collaterally removed), drops its contradiction pairs
+(`RemoveForPathAsync` on the raw `jira://KEY` — no `PathNormalizer`, which would
+mangle the URI), and removes it from the monitored set; `--all` prefix-deletes
+every `jira://` doc in the project, drops the monitored tickets' pairs, and
+clears the monitor (confirms interactively, refuses without `--yes` when
+redirected — the `rtfm purge` pattern). And the *general* `rtfm purge
+<project>` now finishes the job: Jira chunks already carried the `project`
+keyword (so they were always deleted), and it now also drops the project's Jira
+**config + monitor** so nothing lingers, surfacing both on the pre-delete
+"what's on the block" line. Verified live: `jira purge <KEY>` removed one
+ticket's 2 chunks + dropped it from the set (search no longer finds it,
+monitored 4→3); `jira purge --all` cleared the remaining 8 chunks + the monitor
+(`jira watch` then reports "nothing to watch"); and `rtfm purge <project>`
+reported "Jira config + monitor removed". 246 tests (purge is I/O — validated
+live, not unit, matching `PurgeCommand`'s existing coverage). **Phase 25 done:
+the first source RTFM pulls over an authenticated API, indexed, traversed,
+watched, and purged.** Version bump 1.5.1 → 1.6.0 (additive phase) pending at
+release.
+
 **Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
 manual exports remain the ingestion contract for now — Phase 10's staleness
-surfacing is the mitigation), web UI (the LLM client is the UX, §2.11), cloud
-sync/hosting (per-dev local is the model, §intro).
+surfacing is the mitigation; **Phase 25 reverses this specifically for Jira**,
+where the pain is worst and tickets carry real per-item dates — §2.16), web UI
+(the LLM client is the UX, §2.11), cloud sync/hosting (per-dev local is the
+model, §intro).
 
 ---
 
