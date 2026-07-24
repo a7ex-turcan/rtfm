@@ -350,6 +350,89 @@ nothing breaks.
 | `RTFM_MODEL_DIR`      | Embedding-model cache override (e.g. an offline pre-provisioned copy)                                                                                                |
 | `RTFM_GENERATED_DIR`  | Where `save_document` stores agent-generated docs (default `LocalApplicationData/rtfm/generated`; point it at a committed folder to get generated analyses reviewed) |
 
+## Indexing Jira tickets
+
+Besides files in a folder, RTFM can pull tickets straight from a Jira Cloud
+workspace over its REST API and index them like any other document. This is
+**read-only** — RTFM only ever issues `GET`, and has no code path that writes to
+your tracker.
+
+**1. Create a Jira API token.** At
+[id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens),
+click *Create API token*, and copy it.
+
+**2. Put the token in an environment variable.** RTFM never stores the token —
+its config keeps only a *reference* to an env var (default `JIRA_TOKEN`), which
+it expands at call time. Set it so every shell that runs `rtfm` can see it:
+
+```bash
+# macOS / Linux — add to ~/.zshrc or ~/.bashrc to persist:
+export JIRA_TOKEN='paste-your-token-here'
+```
+
+```powershell
+# Windows PowerShell — persist for future sessions:
+setx JIRA_TOKEN "paste-your-token-here"
+# (reopen the terminal so the new value is picked up)
+```
+
+**3. Configure the workspace** (once per project). Point RTFM at your
+workspace URL and the email of the account the token belongs to. The tickets
+you index will belong to the `--project` you name here (the same projects used
+everywhere else):
+
+```bash
+rtfm jira config \
+  --url https://your-company.atlassian.net \
+  --email you@your-company.com \
+  --project myproject
+```
+
+This verifies the credentials immediately (a read-only `GET /myself`) and saves
+the descriptor under `LocalApplicationData/rtfm/jira/`. Optional flags set the
+defaults for later `index`/`watch` runs: `--max-depth <n>` (link-follow depth,
+default 2), `--max-tickets <n>` (crawl budget, default 150), `--poll <seconds>`
+(watch interval, default 300), `--follow-mentions`, and `--token-env <VAR>` if
+you'd rather name a different environment variable than `JIRA_TOKEN`.
+
+**4. Index a ticket — and everything it links to.**
+
+```bash
+# One ticket:
+rtfm jira index PROJ-123 --project myproject
+
+# An epic pulls its stories too — follow links breadth-first, but preview first:
+rtfm jira index PROJ-100 --project myproject --dry-run       # show the crawl plan
+rtfm jira index PROJ-100 --project myproject --depth 2       # then actually index
+```
+
+The crawl follows issue links, parent, subtasks, and epic children, bounded by
+the depth and ticket-budget caps (anything the budget cuts is reported, not
+silently dropped). Each ticket becomes thread-granular chunks — the description
+plus one chunk per comment — carrying the ticket's real author and `updated`
+date. They're now searchable exactly like your other docs, including from your
+LLM client via `search_docs`.
+
+**5. Keep them fresh.** Every indexed ticket joins the project's *monitored
+set*. `watch` polls Jira on an interval and re-indexes any ticket whose
+`updated` changed:
+
+```bash
+rtfm jira watch --project myproject            # runs until Ctrl+C
+rtfm jira watch --project myproject --once     # a single poll (e.g. from cron)
+```
+
+**6. Stop monitoring / clean up.**
+
+```bash
+rtfm jira purge PROJ-123 --project myproject   # drop one ticket
+rtfm jira purge --all --project myproject       # drop every Jira ticket in the project
+```
+
+> **Tip.** Because `.mcp.json` sets `RTFM_PROJECT` per repo, an agent working in
+> that repo searches its Jira tickets alongside its docs automatically — ask it
+> "what was decided on PROJ-123?" and the answer comes from the indexed thread.
+
 ## Supported formats & how they're read
 
 Every format gets a dedicated extractor whose job is to surface the *knowledge*
