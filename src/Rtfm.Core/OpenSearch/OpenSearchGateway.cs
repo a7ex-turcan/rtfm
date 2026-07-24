@@ -96,10 +96,19 @@ public sealed class OpenSearchGateway
     }
 
     /// <summary>Runs an arbitrary delete-by-query body. Returns the number of documents deleted.</summary>
+    /// <remarks>
+    /// Uses <c>conflicts=proceed</c>: a delete-by-query snapshots doc versions at
+    /// the start, so two overlapping deletes (e.g. purging several docs whose
+    /// contradiction pairs reference each other) would otherwise 409 when the
+    /// second deletes an already-removed doc. Proceeding skips the conflicted doc
+    /// rather than failing — correct for removal semantics (we want it gone; a
+    /// survivor is cleaned on the next pass).
+    /// </remarks>
     public async Task<long> DeleteByQueryAsync(string index, string queryJson, CancellationToken cancellationToken = default)
     {
         var response = await _client
-            .DeleteByQueryAsync<StringResponse>(index, PostData.String(queryJson), ctx: cancellationToken)
+            .DeleteByQueryAsync<StringResponse>(index, PostData.String(queryJson),
+                new DeleteByQueryRequestParameters { Conflicts = Conflicts.Proceed }, cancellationToken)
             .ConfigureAwait(false);
 
         EnsureSuccess(response, $"delete_by_query on {index}");
