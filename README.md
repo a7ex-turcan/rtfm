@@ -434,6 +434,94 @@ rtfm jira purge --all --project myproject       # drop every Jira ticket in the 
 > that repo searches its Jira tickets alongside its docs automatically — ask it
 > "what was decided on PROJ-123?" and the answer comes from the indexed thread.
 
+## Indexing Confluence pages
+
+RTFM can also pull pages straight from a Confluence Cloud workspace over its
+REST API and index them like any other document — a page and its whole subtree,
+a folder, or an entire space. Like the Jira integration this is **read-only**:
+RTFM only ever issues `GET` and has no code path that writes to your wiki.
+
+**1. Create an API token.** Same as Jira — at
+[id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens),
+click *Create API token*, and copy it. (One Atlassian token works for both
+products, but RTFM keeps the configs separate so you *can* use different ones.)
+
+**2. Put the token in an environment variable.** RTFM stores only a *reference*
+to an env var (default `CONFLUENCE_TOKEN`), expanded at call time. Set it so
+every shell that runs `rtfm` can see it:
+
+```bash
+# macOS / Linux — add to ~/.zshrc or ~/.bashrc to persist:
+export CONFLUENCE_TOKEN='paste-your-token-here'
+```
+
+```powershell
+# Windows PowerShell — persist for future sessions:
+setx CONFLUENCE_TOKEN "paste-your-token-here"
+# (reopen the terminal so the new value is picked up)
+```
+
+**3. Configure the workspace** (once per project):
+
+```bash
+rtfm confluence config \
+  --url https://your-company.atlassian.net \
+  --email you@your-company.com \
+  --project myproject
+```
+
+This verifies the credentials immediately (a read-only `GET /user/current`) and
+saves the descriptor under `LocalApplicationData/rtfm/confluence/`. Optional
+flags set the defaults for later `index`/`watch` runs: `--max-depth <n>`
+(in-body-link follow depth, default 2), `--max-pages <n>` (crawl budget, default
+200), `--poll <seconds>` (watch interval, default 300), and `--token-env <VAR>`
+to name a different environment variable than `CONFLUENCE_TOKEN`.
+
+**4. Index a page — and everything under it.** `index` accepts whatever you
+copy from your browser's address bar:
+
+```bash
+# A page and its whole subtree of child pages:
+rtfm confluence index "https://your-company.atlassian.net/wiki/spaces/PR/pages/6491078666/Current+PAM+overview" --project myproject
+
+# A folder — everything filed under it (through sub-folders):
+rtfm confluence index "https://your-company.atlassian.net/wiki/spaces/PR/folder/6416695310" --project myproject
+
+# A whole space — by its URL, or with --space:
+rtfm confluence index "https://your-company.atlassian.net/wiki/spaces/PR/overview" --project myproject
+rtfm confluence index --space PR --project myproject
+
+# Preview first (no indexing), and widen/narrow the crawl:
+rtfm confluence index --space PR --project myproject --dry-run
+rtfm confluence index --space PR --project myproject --max-pages 500 --depth 1
+```
+
+The scope (subtree / folder / space) is resolved in one query, then in-body
+links to other pages are followed breadth-first up to `--depth`, bounded by
+`--max-pages` (anything the budget cuts is reported, not silently dropped). Each
+page keeps its own headings, so it chunks with sensible breadcrumbs and carries
+its version author and date. The pages are now searchable like your other docs,
+including from your LLM client via `search_docs`.
+
+**5. Keep them fresh.** Every indexed page joins the project's *monitored set*.
+`watch` polls Confluence and re-indexes any page whose version changed:
+
+```bash
+rtfm confluence watch --project myproject            # runs until Ctrl+C
+rtfm confluence watch --project myproject --once     # a single poll (e.g. from cron)
+```
+
+**6. Stop monitoring / clean up.**
+
+```bash
+rtfm confluence purge 6491078666 --project myproject   # drop one page
+rtfm confluence purge --all --project myproject         # drop every Confluence page in the project
+```
+
+> **Tip.** As with Jira, an agent scoped to `myproject` (via `RTFM_PROJECT` in
+> `.mcp.json`) searches these wiki pages alongside the project's other docs —
+> ask it about a topic and the answer can come straight from the indexed page.
+
 ## Supported formats & how they're read
 
 Every format gets a dedicated extractor whose job is to surface the *knowledge*
