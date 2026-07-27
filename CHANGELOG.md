@@ -14,6 +14,39 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.7.0] - 2026-07-24
+
+### Added
+- **Confluence integration — pull wiki pages over the API and index them**
+  (`rtfm confluence`, read-only; the client issues `GET` and nothing else).
+  Mirrors the Jira integration, applied to a wiki of pages:
+  - `rtfm confluence config --url <workspace> --email <you> [--token-env CONFLUENCE_TOKEN]`
+    stores a per-project descriptor (URL + email + a `${ENV}` reference to the
+    API token — the token itself lives only in the environment) and verifies
+    auth read-only.
+  - `rtfm confluence index <URL>` accepts a **page URL** (the page + its whole
+    subtree), a **folder URL** (its subtree), a **space URL** or `--space <KEY>`
+    (the whole space), or a bare page id. It resolves that scope via CQL
+    (`ancestor`/`space`, which flattens sub-folders in one query) and then
+    follows **in-body page links** breadth-first to `--depth`, bounded by a
+    `--max-pages` budget (dropped pages reported), cycle-safe. Each page renders
+    — headings and all — into heading-breadcrumbed chunks under
+    `confluence://{id}`, carrying its version author and date. `--dry-run`
+    previews the scope.
+  - `rtfm confluence watch [--interval <s>] [--once]` polls the monitored page
+    set and re-indexes any page whose `version.number` increased; the first poll
+    after a restart catches up on anything changed while it was off.
+  - `rtfm confluence purge <id> | --all` drops pages from the index and the
+    monitored set. `rtfm purge <project>` now also clears a project's Confluence
+    (and Jira) connector config and monitored set.
+
+### Fixed
+- **`purge --all` no longer fails with a version conflict.** Delete-by-query now
+  runs with `conflicts=proceed`, so purging several documents whose contradiction
+  pairs reference each other (the second delete hitting an already-removed pair)
+  succeeds instead of 409-ing. Hardens both the Confluence and Jira `purge --all`
+  paths.
+
 ## [1.6.0] - 2026-07-24
 
 ### Added

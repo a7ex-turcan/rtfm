@@ -544,6 +544,58 @@ class of thing, so reversing that for Jira is a decision, not a drive-by.
   persists the *expanded* key set, and `rtfm jira purge` drops it so monitored
   tickets don't pile up.
 
+### 2.17 Live wiki pull (Confluence) — the Jira model, applied to pages
+Phase 26 adds Confluence the same way §2.16 added Jira: an authenticated,
+read-only API pull of pages into the derived index, on demand, with deep
+traversal and a polling watch. It reuses §2.16's decisions wholesale — the ones
+below are only what differs because Confluence is a *wiki of pages*, not a
+tracker of tickets.
+
+- **Same read-only, batch-model, `${ENV}`-secret, synthetic-key discipline as
+  §2.16.** `ConfluenceClient` is GET-only; the config (`${ENV}` token, default
+  `CONFLUENCE_TOKEN` — the same Atlassian account, so either product token
+  works) is per-project under `LocalApplicationData/rtfm/confluence`; the source
+  key is `confluence://{pageId}` built by `ConfluenceSource.Key` (again *not*
+  through `PathNormalizer`). Same workspace URL + email as Jira; kept a separate
+  config so the two products stay independent.
+- **The seed is a *page*, led by its URL; a whole *space* is the bulk option.**
+  Confluence has no single atomic unit like a ticket — knowledge lives in a
+  tree of pages inside spaces. So `rtfm confluence index <URL|id>` seeds from
+  the page a user copied from their browser (the id is parsed from
+  `.../pages/{id}/…`), and `--space <KEY>` enumerates every page in a space
+  (budget-capped) as the bulk alternative. Both funnel into the same crawler.
+- **Traversal follows child pages + in-body page links, not ancestors.** The
+  two edges chosen: the descendant **page tree** (`children.page`) and
+  **in-body links** to other pages (`/pages/{id}/` hrefs in the rendered body,
+  cross-space included) — the "referenced links". Deliberately *not* ancestors:
+  walking upward to parents would pull in unrelated siblings and widen the
+  crawl without adding focused value. Same depth + `maxPages` budget leash,
+  visited-set for cycles, dropped-count reported.
+- **Reuses more of the pipeline than Jira — a page is already a document.**
+  `body.view` comes back as rendered HTML with **real headings**, so it feeds
+  the shared strip→ReverseMarkdown tail *and* the existing heading-aware
+  `MarkdownChunker` with **no synthetic structure** (Jira needed `## Comment`
+  sections; Confluence pages carry their own `<h2>`/`<h3>`). The renderer only
+  prepends `# <title>` + a metadata blockquote (space, ancestors, author,
+  version) ahead of the converted body.
+- **No depth-degrading fidelity.** Unlike a Jira ticket (deep ones went
+  description-only to shed comments), a page *is* its body — a truncated page is
+  just a worse page — so every crawled page is indexed in full; the budget cap
+  is the only size lever.
+- **Change detection uses `version.number`, not a timestamp.** Confluence bumps
+  a monotonic integer `version.number` on every edit, a cleaner signal than the
+  `updated` clock Jira had to use; the monitor stores it and re-indexes when the
+  live number is higher. `source_modified_at` is still `version.when` (+
+  `version.by` author). Otherwise the watch loop, monitored-set registry, and
+  `confluence purge` mirror §2.16 exactly.
+- **Parallel namespace, not shared "Atlassian" infra.** `Rtfm.Core/Confluence/`
+  mirrors `Rtfm.Core/Jira/` (client, config+store, crawler, monitor, source
+  key, renderer) rather than extracting a shared base. Consistent with RTFM's
+  per-format converters (§2.5): independent and comprehensible beats
+  prematurely-DRY. Genuinely shared bits are already shared
+  (`EnvironmentExpansion`, `DocumentIngestor.IngestDocumentAsync`); extract more
+  only if a third Atlassian product ever appears.
+
 ---
 
 ## 3. Tech stack / dependencies
@@ -566,6 +618,7 @@ class of thing, so reversing that for Jira is a decision, not a drive-by.
 | Live DB schema pull (Phase 20) | `Microsoft.Data.SqlClient` + `Npgsql` via INFORMATION_SCHEMA |
 | Email (`.eml`, `.mbox`) → markdown (Phase 24) | `MimeKit` (already shipped for MHTML) — quote/signature strip is hand-rolled |
 | Jira Cloud pull (Phase 25) | none — `HttpClient` (REST v3, Basic auth) + `System.Text.Json`; rendered-HTML fields reuse the ReverseMarkdown tail |
+| Confluence Cloud pull (Phase 26) | none — `HttpClient` (REST v1, Basic auth) + `System.Text.Json`; `body.view` HTML reuses the ReverseMarkdown tail *and* the heading-aware chunker |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -1800,12 +1853,125 @@ the first source RTFM pulls over an authenticated API, indexed, traversed,
 watched, and purged.** Version bump 1.5.1 → 1.6.0 (additive phase) pending at
 release.
 
-**Deliberately not planned:** Confluence API pull (auth/token/rate-limit sprawl;
-manual exports remain the ingestion contract for now — Phase 10's staleness
-surfacing is the mitigation; **Phase 25 reverses this specifically for Jira**,
-where the pain is worst and tickets carry real per-item dates — §2.16), web UI
-(the LLM client is the UX, §2.11), cloud sync/hosting (per-dev local is the
-model, §intro).
+### Phase 26 — Confluence integration: page pull + deep traversal + polling watch (§2.17) ✅ **Done**
+Confluence, the Jira model applied to a wiki of pages (§2.17). A configured
+workspace is pulled by page (URL/id) or space, the page's descendant tree and
+in-body links are followed into the current project, and a poll loop keeps a
+monitored set fresh on `version.number`. Four verifiable steps, mirroring
+Phase 25.
+
+- **Step 1 — `ConfluenceClient` + config + index one page.** `rtfm confluence
+  config --url <ws> --email <you> [--token-env CONFLUENCE_TOKEN] [--project
+  <name>]` stores a per-project descriptor and verifies auth (`GET
+  /wiki/rest/api/user/current`). `rtfm confluence index <URL|id>` pulls the page
+  (`expand=body.view,space,version,ancestors,children.page`), renders `#
+  <title>` + a metadata blockquote (space · ancestors · author · version) + the
+  `body.view` HTML through the shared ReverseMarkdown tail (its own headings
+  drive chunking), and ingests it under `confluence://{pageId}` via
+  `DocumentIngestor.IngestDocumentAsync`. *Done when:* `index <page URL>` indexes
+  one page as heading-breadcrumbed chunks, `source_modified_at` = `version.when`,
+  and `search_docs` answers a question about it.
+- **Step 2 — traversal.** Follow child pages + in-body `/pages/{id}/` links
+  breadth-first to `--depth`, bounded by `--max-pages`, cycle-safe, dropped
+  links reported; `--dry-run` prints the plan; `--space <KEY>` seeds every page
+  in a space. *Done when:* a page with a child tree indexes a bounded set, no
+  loop, drop-count reported; `--space` bulk-indexes.
+- **Step 3 — monitor + `rtfm confluence watch`.** Persist the crawled page set +
+  each page's `version.number`; poll (batched by id via CQL/`content` search),
+  re-index pages whose live version is higher. *Done when:* editing a monitored
+  page is reflected within one poll cycle.
+- **Step 4 — purge.** `rtfm confluence purge <id>|--all [--project]`, and fold
+  Confluence config/monitor cleanup into the general `rtfm purge <project>`.
+  *Done when:* a purged page vanishes from `search_docs` and stops being polled.
+
+Zero MCP-tool changes: indexed pages are ordinary chunks.
+
+*Step 1 delivered.* `Rtfm.Core/Confluence/` mirrors `Jira/`: `ConfluenceConfig`
+(+ `ConfluenceConfigStore` under `LocalApplicationData/rtfm/confluence`, `${ENV}`
+token default `CONFLUENCE_TOKEN`), `ConfluenceClient` (read-only REST v1, Basic
+auth, GET-only — `FetchPageAsync` + a `/user/current` `VerifyAuthAsync`; handler
+seam for tests), `ConfluenceModels` (+ `ConfluenceDate`), `ConfluenceSource`
+(the `confluence://{id}` key + `ParsePageId` from a page URL or bare id), and
+`ConfluenceDocumentRenderer` (`# <title>` + metadata blockquote + the
+`body.view` HTML through the shared tail — the page's own `<h2>`/`<h3>` become
+the chunk breadcrumbs, no synthetic structure). Ingest via the shared
+`DocumentIngestor.IngestDocumentAsync`. CLI: `rtfm confluence config|index|list`.
+Verified live against `internationalsos.atlassian.net`: `config` auth-checks
+read-only; `confluence index <full page URL>` parsed the id and indexed the
+AISDLC programme page → 5 chunks, `source_modified_at` = `version.when`
+(2026-07-01), breadcrumb `AI SDLC … Programme > Description` (the body heading
+drove it); search hit it #1 (1.00); **re-index by bare id stayed 5 chunks**
+(the synthetic-key delete-by-query round-trips); the page's 4 children + 4
+in-body links were detected (traversal fuel for step 2); `purge` removed all 5.
+258 tests (13 new).
+
+*Step 2 delivered.* `ConfluenceCrawler` + seed-aware `index`. The key finding:
+**CQL `ancestor = {id}` flattens a page/folder subtree through sub-folders in
+one query** (and `space = "{key}"` a whole space), so the page *tree* is
+resolved in a single cheap call rather than level-walked. `ConfluenceSource.ParseSeed`
+classifies the three URL shapes — `/pages/{id}` → page (+ its subtree via
+`(id = X OR ancestor = X)`), `/folder/{id}` → folder (its subtree), `/spaces/{KEY}`
+→ whole space — plus a bare id (page) and a `--space <KEY>` override. The crawl
+resolves that scope, then follows **in-body `/pages/{id}/` links** breadth-first
+to `--depth` (link hops beyond the scope; 0 = scope only), cycle-safe, non-page
+content (folders/whiteboards) skipped. `--max-pages` budgets it and `--dry-run`
+prints the scope plan. **Bug caught live and fixed:** scope was first resolved
+capped at the runtime budget, so a 60-page folder with `--max-pages 8` indexed 8
+and *silently* dropped 52 — violating §5. Now the full scope is listed (CQL is
+id+title only, cheap), the whole set is enqueued, and the BFS budget-cap reports
+the accurate `Dropped` count. Verified live on the real `PR` space: the
+page-with-subpages resolved to 6 (self + 5 descendants), the folder to **60**
+(pages nested through its sub-folders), the space capped at the budget; a real
+`--depth 0` index of the page → 6 pages / 50 chunks with a descendant (`PAM
+Database Schema Summary`) answering #1; the folder at `--max-pages 8` indexed 8
+and reported "52 more discovered but not followed". 262 tests (4 new; a
+malformed-JSON test-stub bug — unescaped `href="…"` quotes — was the only
+failure, fixed with single-quoted fixture hrefs).
+
+*Step 3 delivered.* The monitored-set registry + polling watch, on
+`version.number` (Confluence's monotonic edit counter — cleaner than Jira's
+timestamp, no timezone or precision worry). `ConfluenceMonitorStore` (per-project
+`ConfluenceMonitor` of `MonitoredPage{id, lastVersion}` under
+`LocalApplicationData/rtfm/confluence/monitor`); `confluence index` records its
+crawled pages there. `rtfm confluence watch [--interval <s>] [--once]` polls:
+`ConfluenceClient.FetchVersionsAsync` batches `id in (…)` CQL with
+`expand=version` for each page's live number, `ConfluenceMonitor.SelectChanged`
+(pure, unit-tested) returns the ids whose live version is higher than stored, and
+each is re-fetched → re-rendered → `IngestDocumentAsync` → its version updated.
+The monitor reloads each poll (picks up a concurrent index), `--interval` floors
+at 30 s, and the first poll after a restart is the catch-up. Verified live: index
+a 6-page subtree → 6 monitored; `watch --once` → "polled 6 — no changes";
+backdating one page's stored version (simulating a remote edit without writing
+to Confluence) → next poll re-indexed exactly that page ("PAM Platform
+Assessment" → 11 chunks); the poll after → "no changes". 265 tests (3 new).
+
+*Step 4 delivered (phase complete).* `rtfm confluence purge <PAGE-URL|id> | --all
+[--project] [--yes]`: a single page deletes its chunks (scoped to `source_path`
++ `project`), drops its contradiction pairs, and removes it from the monitored
+set; `--all` prefix-deletes every `confluence://` doc, drops the monitored
+pages' pairs, and clears the monitor (confirms interactively, refuses without
+`--yes` when redirected). The general `rtfm purge <project>` now also drops a
+project's Confluence config + monitor (surfaced on the "what's on the block"
+line), completing the Jira+Confluence symmetry. **Bug caught + fixed live:**
+`purge --all` 409'd on the contradiction index — `RemoveForPathAsync` is called
+per page in a loop, and a contradiction pair *between two monitored pages* is
+matched by both deletes, so the second conflicts on the already-removed pair.
+Fixed at the source in `OpenSearchGateway.DeleteByQueryAsync` — it now issues
+`conflicts=proceed` (a delete-by-query snapshots versions; proceeding past a
+conflict is the correct removal semantics and it fixes the same latent risk in
+the Jira `purge --all` loop too). Verified live: index 6 pages → purge one (11
+chunks, dropped from set, 6→5 monitored) → `purge --all` (39 chunks, monitor
+cleared, `watch` then "nothing to watch") → `rtfm purge <project>` reports
+"Confluence config + monitor removed". 265 tests (purge is I/O — validated live,
+matching `PurgeCommand`). **Phase 26 done: Confluence — pages pulled by URL,
+whole subtrees/spaces resolved via CQL, linked pages followed, watched on
+`version.number`, and purged.** Version bump 1.6.0 → 1.7.0 (additive phase)
+pending at release.
+
+**Deliberately not planned:** web UI (the LLM client is the UX, §2.11), cloud
+sync/hosting (per-dev local is the model, §intro). (Confluence API pull was
+deferred through Phase 25; **Phase 26 delivers it** — §2.17, the same reversal
+as Jira, once the parallel infrastructure already existed.)
 
 ---
 
