@@ -113,9 +113,10 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
                 continue;
             }
 
-            var rendered = renderer.Render(page, baseUrl, pulledAt);
+            var comments = await client.FetchCommentsAsync(page.Id, cancellationToken).ConfigureAwait(false);
+            var rendered = renderer.Render(page, comments, baseUrl, pulledAt);
             nodes.Add(new ConfluenceCrawlNode(page.Id, depth, page, rendered));
-            log?.Invoke($"pulled {page.Id} \"{page.Title}\" (depth {depth})");
+            log?.Invoke($"pulled {page.Id} \"{page.Title}\" (depth {depth}, {comments.Count} comment(s))");
 
             if (depth < maxDepth)
             {

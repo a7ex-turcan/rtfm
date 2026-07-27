@@ -109,6 +109,68 @@ public class ConfluenceTests
     }
 
     [Fact]
+    public void ParseComment_reads_inline_anchor_footer_and_author()
+    {
+        const string inline =
+            """
+            {
+              "id": "999", "type": "comment",
+              "extensions": {"location": "inline", "resolution": {"status": "open"},
+                             "inlineProperties": {"originalSelection": "The outbox pattern is a hard requirement"}},
+              "history": {"createdBy": {"displayName": "Anil Yedla"}, "createdDate": "2026-07-23T15:27:57.546Z"},
+              "body": {"view": {"value": "<p>can we also have AttributeDeleted?</p>"}}
+            }
+            """;
+        using var d1 = JsonDocument.Parse(inline);
+        var c1 = ConfluenceClient.ParseComment(d1.RootElement);
+        Assert.True(c1.IsInline);
+        Assert.Equal("Anil Yedla", c1.Author);
+        Assert.Equal("The outbox pattern is a hard requirement", c1.AnchorText);
+        Assert.Equal("open", c1.Resolution);
+        Assert.Equal(2026, c1.Created!.Value.Year);
+        Assert.Contains("AttributeDeleted", c1.BodyHtml);
+
+        const string footer =
+            """
+            {"id": "888", "extensions": {"location": "footer"},
+             "history": {"createdBy": {"displayName": "Bob"}, "createdDate": "2026-07-01T00:00:00Z"},
+             "body": {"view": {"value": "<p>Nice work.</p>"}}}
+            """;
+        using var d2 = JsonDocument.Parse(footer);
+        var c2 = ConfluenceClient.ParseComment(d2.RootElement);
+        Assert.False(c2.IsInline);
+        Assert.Null(c2.AnchorText);
+        Assert.Equal("Bob", c2.Author);
+    }
+
+    [Fact]
+    public void Render_appends_inline_and_footer_comment_sections()
+    {
+        var page = new ConfluencePage(
+            Id: "1", Title: "ADR", Type: "page", SpaceKey: "PR", Ancestors: [],
+            VersionNumber: 2, VersionWhen: new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero), VersionBy: "Alice",
+            BodyHtml: "<p>The decision body.</p>", ChildPageIds: [], LinkedPageIds: []);
+
+        var comments = new[]
+        {
+            new ConfluenceComment("10", "Anil Yedla", new DateTimeOffset(2026, 7, 23, 15, 27, 0, TimeSpan.Zero),
+                "inline", "The outbox pattern is a hard requirement", "open", "<h1>injected</h1><p>can we also have AttributeDeleted?</p>"),
+            new ConfluenceComment("20", "Bob", new DateTimeOffset(2026, 7, 24, 9, 0, 0, TimeSpan.Zero),
+                "footer", null, null, "<p>Agreed, ship it.</p>"),
+        };
+
+        var md = new ConfluenceDocumentRenderer().Render(page, comments, "https://x.atlassian.net", new DateTimeOffset(2026, 7, 25, 0, 0, 0, TimeSpan.Zero)).Markdown;
+
+        Assert.Contains("## Inline comment by Anil Yedla, 2026-07-23", md);
+        Assert.Contains("> On: \"The outbox pattern is a hard requirement\"", md);
+        Assert.Contains("can we also have AttributeDeleted?", md);
+        Assert.Contains("## Comment by Bob, 2026-07-24", md);
+        Assert.Contains("Agreed, ship it.", md);
+        // A heading injected in a comment body is escaped, not a real section.
+        Assert.Contains(@"\# injected", md);
+    }
+
+    [Fact]
     public void Render_uses_the_title_as_h1_and_keeps_body_headings()
     {
         var when = new DateTimeOffset(2026, 7, 1, 12, 18, 0, TimeSpan.Zero);
@@ -125,7 +187,7 @@ public class ConfluenceTests
             ChildPageIds: ["111"],
             LinkedPageIds: []);
 
-        var rendered = new ConfluenceDocumentRenderer().Render(page, "https://x.atlassian.net", new DateTimeOffset(2026, 7, 5, 0, 0, 0, TimeSpan.Zero));
+        var rendered = new ConfluenceDocumentRenderer().Render(page, [], "https://x.atlassian.net", new DateTimeOffset(2026, 7, 5, 0, 0, 0, TimeSpan.Zero));
 
         Assert.Equal("6598099635", rendered.PageId);
         Assert.Equal("AI SDLC Programme", rendered.Title);

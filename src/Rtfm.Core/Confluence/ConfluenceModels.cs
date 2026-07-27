@@ -37,6 +37,26 @@ public enum ConfluenceSeedKind
 /// <summary>A resolved indexing seed: a kind plus the content id (page/folder) or space key it names.</summary>
 public sealed record ConfluenceSeed(ConfluenceSeedKind Kind, string Value);
 
+/// <summary>
+/// One comment on a page (§ comment-indexing enhancement). <see cref="Location"/>
+/// is <c>inline</c> (anchored to highlighted page text — <see cref="AnchorText"/>
+/// holds that highlighted selection) or <c>footer</c> (a general page comment).
+/// <see cref="BodyHtml"/> is the rendered comment body, reused through the shared
+/// tail like a page body.
+/// </summary>
+public sealed record ConfluenceComment(
+    string Id,
+    string Author,
+    DateTimeOffset? Created,
+    string Location,
+    string? AnchorText,
+    string? Resolution,
+    string BodyHtml)
+{
+    /// <summary>True for a text-anchored inline comment (vs a footer/general comment).</summary>
+    public bool IsInline => string.Equals(Location, "inline", StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>Raised for a Confluence API failure the CLI should report cleanly (auth, not-found, HTTP error).</summary>
 public sealed class ConfluenceException(string message) : Exception(message);
 

@@ -1968,6 +1968,27 @@ whole subtrees/spaces resolved via CQL, linked pages followed, watched on
 `version.number`, and purged.** Version bump 1.6.0 → 1.7.0 (additive phase)
 pending at release.
 
+*Post-phase enhancement (1.8.0) — page comments.* Confluence comments are a
+separate `comment` content type, so the page fetch never saw them; now
+`ConfluenceClient.FetchCommentsAsync` pulls each page's comments
+(`/content/{id}/child/comment`, paginated, capped at 200/page) — **both footer
+(general) and inline** — and the renderer appends them as `##` sections so each
+becomes its own retrievable chunk (the Jira per-comment pattern). An **inline
+comment carries the highlighted passage it annotates** (`extensions
+.inlineProperties.originalSelection`), rendered as `> On: "…"` so the discussion
+is searchable by what it's *about* — the highest-value part. Author/date come
+from `history.createdBy`/`createdDate`; comment bodies reuse the shared tail with
+the leading-`#` escape. Fetched on every crawl and every watch re-index (one
+extra GET per page — comments are worth it). Verified live: ADR-016's page →
+23 chunks, and a question asked *only* in an inline comment answers #1 (1.00)
+under `… > Inline comment by <author>`. **Two known limits, documented:** (1)
+`watch` polls page `version.number`, which a **comment does not bump**, so a
+comment-only change isn't detected until the page body next changes or a fresh
+`index` — surfacing comment edits would need per-page comment-state tracking, a
+follow-up; (2) only **top-level** comments are pulled, not replies-to-comments
+(another `/child/comment` level down) — deferred as most value is top-level.
+267 tests (2 new).
+
 **Deliberately not planned:** web UI (the LLM client is the UX, §2.11), cloud
 sync/hosting (per-dev local is the model, §intro). (Confluence API pull was
 deferred through Phase 25; **Phase 26 delivers it** — §2.17, the same reversal

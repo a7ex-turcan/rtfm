@@ -14,6 +14,21 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.8.0] - 2026-07-27
+
+### Added
+- **Confluence page comments are now indexed** — both **footer** (general) and
+  **inline** comments. Each comment becomes its own retrievable chunk under the
+  page (like Jira ticket comments), and an inline comment carries the
+  **highlighted passage it annotates**, so searching for that passage's topic
+  surfaces the discussion. Comments are pulled on every `confluence index` and
+  every `watch` re-index.
+
+  Two limits worth knowing: `watch` polls a page's version number, and adding a
+  comment does not bump it — so a comment-only change isn't detected until the
+  page body next changes (re-run `index` to refresh on demand); and only
+  top-level comments are indexed, not replies to comments.
+
 ## [1.7.0] - 2026-07-24
 
 ### Added
