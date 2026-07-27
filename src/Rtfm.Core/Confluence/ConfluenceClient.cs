@@ -231,6 +231,82 @@ public sealed partial class ConfluenceClient : IDisposable
         return results;
     }
 
+    // Comment expand: rendered body, the inline anchor (originalSelection) and
+    // resolution status, and the original author/date from history.
+    private const string CommentExpand = "body.view,extensions.inlineProperties,extensions.resolution,history.createdBy,history.createdDate,version";
+
+    /// <summary>Hard cap on comments pulled per page — a page with a runaway thread can't stall a crawl.</summary>
+    private const int MaxCommentsPerPage = 200;
+
+    /// <summary>
+    /// Pulls a page's comments — both inline (text-anchored) and footer (general)
+    /// — GET only, paginated. Inline comments carry the highlighted passage they
+    /// annotate (<see cref="ConfluenceComment.AnchorText"/>). A failure returns
+    /// what was gathered; comments are additive, never a reason to fail the page.
+    /// </summary>
+    public async Task<IReadOnlyList<ConfluenceComment>> FetchCommentsAsync(string pageId, CancellationToken cancellationToken = default)
+    {
+        var comments = new List<ConfluenceComment>();
+        var start = 0;
+
+        try
+        {
+            while (comments.Count < MaxCommentsPerPage)
+            {
+                var limit = Math.Min(100, MaxCommentsPerPage - comments.Count);
+                var url = $"rest/api/content/{Uri.EscapeDataString(pageId.Trim())}/child/comment?expand={CommentExpand}&limit={limit}&start={start}";
+
+                using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    break;
+                }
+
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                var page = GetArray(doc.RootElement, "results");
+                if (page.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var item in page)
+                {
+                    comments.Add(ParseComment(item));
+                }
+
+                if (page.Count < limit)
+                {
+                    break;
+                }
+
+                start += limit;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            // Best-effort — return the comments gathered so far.
+        }
+
+        return comments;
+    }
+
+    internal static ConfluenceComment ParseComment(JsonElement root)
+    {
+        var extensions = GetObject(root, "extensions");
+        var history = GetObject(root, "history");
+        var version = GetObject(root, "version");
+
+        return new ConfluenceComment(
+            Id: GetString(root, "id") ?? string.Empty,
+            Author: GetString(GetObject(history, "createdBy"), "displayName")
+                ?? GetString(GetObject(version, "by"), "displayName") ?? "Unknown",
+            Created: ConfluenceDate.Parse(GetString(history, "createdDate") ?? GetString(version, "when")),
+            Location: GetString(extensions, "location") ?? "footer",
+            AnchorText: GetString(GetObject(extensions, "inlineProperties"), "originalSelection"),
+            Resolution: GetString(GetObject(extensions, "resolution"), "status"),
+            BodyHtml: GetString(GetObject(GetObject(root, "body"), "view"), "value") ?? string.Empty);
+    }
+
     /// <summary>
     /// The live <c>version.number</c> for each of <paramref name="ids"/> (GET
     /// only), via batched <c>id in (…)</c> CQL searches with <c>expand=version</c>

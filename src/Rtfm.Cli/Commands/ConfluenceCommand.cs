@@ -433,7 +433,8 @@ internal static class ConfluenceCommand
                     continue;
                 }
 
-                var rendered = renderer.Render(page, config.BaseUrl, now);
+                var comments = await client.FetchCommentsAsync(page.Id, cancellationToken).ConfigureAwait(false);
+                var rendered = renderer.Render(page, comments, config.BaseUrl, now);
                 var n = await ingestor.IngestDocumentAsync(
                     ConfluenceSource.Key(page.Id), rendered.Markdown, rendered.Title, rendered.ModifiedAt, project, now, cancellationToken).ConfigureAwait(false);
                 monitor.Set(new MonitoredPage(page.Id, page.VersionNumber));
