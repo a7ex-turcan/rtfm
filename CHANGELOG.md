@@ -14,6 +14,27 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.9.0] - 2026-07-30
+
+### Added
+- **`rtfm describe project <name>`** — the detail view for a single project,
+  laid out `kubectl describe` style: an aligned field block (documents, chunks,
+  vector coverage, source-date span, last index time, note and contradiction
+  counts) followed by sections for the breakdown **by source type** (`md`,
+  `pdf`, `jira`, `confluence`, …), watched folders, Jira/Confluence connectors
+  and their monitored sets, `.rtfmdb` connectors and their access level, the
+  open contradictions, the override notes, and the document listing.
+
+  Where `rtfm status` is one row per project across the machine, this is
+  everything RTFM holds for *one* — the read-side mirror of what `rtfm purge`
+  would delete. The name defaults to `RTFM_PROJECT`, so inside a wired-up repo
+  the bare `rtfm describe project` works; an unknown name lists the projects
+  that do exist. Documents are listed top-20 by chunk count with the remainder
+  reported (`--all` lists every one), and documents sharing a filename are
+  disambiguated by as much of their folder path as it takes.
+
+  Everything reported is already indexed — no mapping, ingest, or MCP changes.
+
 ## [1.8.0] - 2026-07-27
 
 ### Added

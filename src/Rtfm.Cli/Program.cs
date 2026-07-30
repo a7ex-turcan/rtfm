@@ -42,6 +42,9 @@ switch (args[0])
     case "status":
         return await StatusCommand.RunAsync(args[1..]);
 
+    case "describe":
+        return await DescribeCommand.RunAsync(args[1..]);
+
     case "contradictions":
         return await ContradictionsCommand.RunAsync(args[1..]);
 
@@ -121,6 +124,7 @@ static int PrintUsage()
     commands.AddRow($"[{Ui.Accent}]watch[/] [dim]<folder...> [[--project <name>]] | --all[/]", "Watch one/many folders (or --all indexed) and keep the index fresh");
     commands.AddRow($"[{Ui.Accent}]search[/] [dim]<query...> [[--project <name>|--all]][/]", "Hybrid search (lexical + semantic; omit --project to span all)");
     commands.AddRow($"[{Ui.Accent}]status[/] [dim][[--project <name>]] [[--stale <days>]][/]", "Index health: projects, counts, vector coverage, staleness");
+    commands.AddRow($"[{Ui.Accent}]describe[/] [dim]project [[<name>]] [[--all]][/]", "Everything RTFM holds for one project (kubectl-describe style)");
     commands.AddRow($"[{Ui.Accent}]contradictions[/] [dim][[--project]] [[--closed]] | dismiss <id> | resolve <id> --note <text>[/]", "Doc-vs-doc disagreements: list, dismiss, or resolve into an override note");
     commands.AddRow($"[{Ui.Accent}]note[/] [dim]add <text>|list|rm <id> [[--project]] [[--doc <path>]][/]", "Override notes: corrections that survive re-indexing");
     commands.AddRow($"[{Ui.Accent}]db[/] [dim]list | query <name> \"<sql>\" [[--project]] [[--max-rows <n>]][/]", "Live DB gateway: list .rtfmdb connectors, run read-only queries");
