@@ -17,12 +17,19 @@ public sealed record JiraCrawlNode(string Key, int Depth, JiraIssue Issue, Rende
 /// <param name="Dropped">Discovered but not pulled because the <see cref="JiraCrawlOptions.MaxTickets"/> budget was hit.</param>
 /// <param name="BudgetHit">True when the budget stopped the walk (some links were left unfollowed).</param>
 /// <param name="Skipped">Keys that could not be fetched (deleted, or no permission) — logged, never fatal.</param>
+/// <param name="Warnings">
+/// Non-fatal degradations, de-duplicated — today, the Development panel being
+/// unreadable (<see cref="JiraClient.FetchDevelopmentAsync"/>). The crawl
+/// succeeded; the caller should surface these so a silently thinner index is
+/// never mistaken for a complete one.
+/// </param>
 public sealed record JiraCrawlResult(
     IReadOnlyList<JiraCrawlNode> Nodes,
     int Discovered,
     int Dropped,
     bool BudgetHit,
-    IReadOnlyList<string> Skipped);
+    IReadOnlyList<string> Skipped,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>
 /// Breadth-first traversal of a Jira ticket's neighbourhood (§2.16 Phase 25
@@ -56,7 +63,20 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
 
         var nodes = new List<JiraCrawlNode>();
         var skipped = new List<string>();
+        var warnings = new List<string>();
         var budgetHit = false;
+
+        // Dev-status degradations repeat per ticket; the client latches off after
+        // a structural failure, but transient ones can recur, so de-duplicate.
+        void Warn(string message)
+        {
+            if (!warnings.Contains(message, StringComparer.Ordinal))
+            {
+                warnings.Add(message);
+            }
+
+            log?.Invoke(message);
+        }
 
         // Project keys are only needed to validate mention edges (and only the
         // seed contributes those), so fetch them once, up front, when opted in.
@@ -86,10 +106,18 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
                 continue;
             }
 
-            var rendered = renderer.Render(issue, baseUrl, pulledAt);
+            // The Development panel is pulled at every depth, not just the seed:
+            // PRs and commits hang off the *stories* under an epic, so gating it
+            // to the seed the way comment fidelity is gated would make the
+            // feature miss its most common case. It costs one extra request for
+            // a ticket with no development data, two or three for one with.
+            var development = await client.FetchDevelopmentAsync(issue.Id, Warn, cancellationToken).ConfigureAwait(false);
+
+            var rendered = renderer.Render(issue, baseUrl, pulledAt, development);
             var canonical = issue.Key.ToUpperInvariant();
             nodes.Add(new JiraCrawlNode(canonical, depth, issue, rendered));
-            log?.Invoke($"pulled {canonical} (depth {depth})");
+            log?.Invoke($"pulled {canonical} (depth {depth}"
+                + (development.IsEmpty ? ")" : $", {development.PullRequests.Count} PR(s), {development.Commits.Count} commit(s))"));
 
             // Tickets at the depth limit are indexed but not expanded — no point
             // discovering neighbours we would never follow.
@@ -109,7 +137,7 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
 
         // Everything discovered but neither indexed nor skipped was cut by the budget.
         var dropped = Math.Max(0, visited.Count - nodes.Count - skipped.Count);
-        return new JiraCrawlResult(nodes, visited.Count, dropped, budgetHit, skipped);
+        return new JiraCrawlResult(nodes, visited.Count, dropped, budgetHit, skipped, warnings);
     }
 
     private async Task<IReadOnlyList<string>> NeighboursAsync(

@@ -10,6 +10,9 @@ namespace Rtfm.Core.Jira;
 public sealed record JiraIssue(
     string Key,
     string Summary,
+    // The numeric issue id. Only the dev-status endpoint needs it — that API
+    // keys on id, not on the ticket key.
+    string? Id,
     string? Status,
     string? IssueType,
     string? Reporter,

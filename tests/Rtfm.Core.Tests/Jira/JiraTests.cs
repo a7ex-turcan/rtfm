@@ -155,6 +155,7 @@ public class JiraTests
         var issue = new JiraIssue(
             Key: "ABC-1",
             Summary: "Do the thing",
+            Id: "10001",
             Status: "Open",
             IssueType: "Task",
             Reporter: "Alice",
