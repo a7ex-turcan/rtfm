@@ -14,6 +14,39 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.10.0] - 2026-08-06
+
+### Added
+- **Jira tickets now index their Development panel** — the linked branches,
+  pull requests, and commits that Jira shows beside a ticket but keeps off the
+  issue resource. Pull requests carry title, state, source → target branch,
+  repository, author, reviewers and who approved, and the URL; commits carry
+  their **full message**. Each becomes its own chunk (`KEY: summary >
+  Development > Pull requests` / `> Commits`), so "which PR implemented
+  PROJ-123?" is directly answerable.
+
+  The commit messages are the larger win: a well-written one carries the
+  implementation rationale that exists in no wiki page and no ticket comment,
+  and it is now retrievable alongside the docs. Validated on a real ticket — a
+  question answerable only from a commit body ranks that commit's chunk first,
+  with the next hit at zero.
+
+  Pulled at every crawl depth, not just the seed, because pull requests hang
+  off the *stories* under an epic. Both ingest routes carry it: `rtfm jira
+  index` and `rtfm jira watch`. No CLI flags, no MCP tool changes, no mapping
+  change.
+
+### Notes
+- This data comes from the endpoint behind Jira's own Development panel, which
+  Atlassian does not publish as a supported API. RTFM therefore treats it as
+  **best-effort and never fatal**: a failure warns once — the endpoint is
+  latched off for the rest of the run rather than retried per ticket — and the
+  tickets still index without the section.
+- **Known limit:** opening or merging a pull request does not change the
+  ticket's `updated` timestamp, which is what `rtfm jira watch` compares, so
+  the watch loop does not notice pull-request activity on its own. The panel
+  refreshes when the ticket itself changes, or on the next `rtfm jira index`.
+
 ## [1.9.0] - 2026-07-30
 
 ### Added

@@ -530,6 +530,35 @@ class of thing, so reversing that for Jira is a decision, not a drive-by.
   strip→ReverseMarkdown tail with no new converter. (Comment *dates* in
   `renderedFields` are display-formatted, so machine dates + authors are read
   from the raw `fields.comment` and joined to rendered bodies by comment id.)
+- **The Development panel rides an *undocumented* endpoint — that is the whole
+  caveat.** A ticket's linked branches, pull requests, and commits are not on
+  the issue resource; they come from `/rest/dev-status/`, the internal API
+  behind Jira's own Development panel. Same Basic auth, still GET-only, but
+  **no published schema and no compatibility promise**, unlike every other call
+  RTFM makes. So it is best-effort *by construction*:
+  `JiraClient.FetchDevelopmentAsync` **never throws** (fetch *and* parse are
+  guarded), a 404/401/403 **latches it off for the rest of the run** — one
+  warning, not one per ticket — and the ticket still indexes, minus the
+  section. Cost is bounded at two calls: a `summary` gate (a ticket with no
+  development data costs exactly one request and no detail calls), then
+  `detail` for `pullrequest` — which returns branches alongside the PRs, since
+  `dataType=branch` was measured byte-identical — and `repository`, which
+  carries the commits. Pulled at **every** crawl depth, not just the seed: PRs
+  hang off the *stories* under an epic, so gating it the way comment fidelity
+  is gated would have made the feature miss its commonest case.
+  **Commit messages are the real prize** — a well-written one carries
+  implementation rationale that exists in no wiki page and no ticket comment.
+  Rendered as `## Development` with `###` sub-sections so the chunker gives
+  pull requests and commits their own chunks (granularity, §§2.5/15/18/24
+  again); commit messages go in as prose, never fenced, so the semantic tier
+  can reach the reasoning in them.
+- **Known limit: watch cannot see PR changes.** Opening or merging a PR does
+  not bump the ticket's `updated`, which is what the poll loop compares, so
+  development data refreshes only when the ticket itself changes or is
+  re-indexed. Exactly the shape of §2.17's comment-vs-`version.number` gap, and
+  recorded rather than papered over. The summary endpoint does expose a
+  per-category `lastUpdated` if this is ever worth one extra call per monitored
+  ticket.
 - **Graph traversal is leashed (§Phase 25 step 2).** "Follow every linked
   ticket" will try to eat the instance; three independent caps —
   `maxDepth`, a hard `maxTickets` budget, and depth-degrading fidelity — bound
@@ -617,7 +646,7 @@ tracker of tickets.
 | SQL schema files (Phase 18) | none — built-in dialect-tolerant DDL scanner |
 | Live DB schema pull (Phase 20) | `Microsoft.Data.SqlClient` + `Npgsql` via INFORMATION_SCHEMA |
 | Email (`.eml`, `.mbox`) → markdown (Phase 24) | `MimeKit` (already shipped for MHTML) — quote/signature strip is hand-rolled |
-| Jira Cloud pull (Phase 25) | none — `HttpClient` (REST v3, Basic auth) + `System.Text.Json`; rendered-HTML fields reuse the ReverseMarkdown tail |
+| Jira Cloud pull (Phase 25) | none — `HttpClient` (REST v3, Basic auth) + `System.Text.Json`; rendered-HTML fields reuse the ReverseMarkdown tail. The Development panel additionally reads `/rest/dev-status/` — **undocumented, best-effort, never fatal** (§2.16) |
 | Confluence Cloud pull (Phase 26) | none — `HttpClient` (REST v1, Basic auth) + `System.Text.Json`; `body.view` HTML reuses the ReverseMarkdown tail *and* the heading-aware chunker |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
@@ -1852,6 +1881,34 @@ live, not unit, matching `PurgeCommand`'s existing coverage). **Phase 25 done:
 the first source RTFM pulls over an authenticated API, indexed, traversed,
 watched, and purged.** Version bump 1.5.1 → 1.6.0 (additive phase) pending at
 release.
+
+*Post-phase enhancement — the Development panel (branches, PRs, commits).* The
+Jira analog of 1.8.0's Confluence comments: a ticket's linked development work
+was invisible, so "which PR implemented this?" was unanswerable. Now
+`JiraClient.FetchDevelopmentAsync` pulls `/rest/dev-status/` (the decision, the
+undocumented-endpoint caveat, and the degradation contract are §2.16) and
+`JiraDocumentRenderer` renders a `## Development` section with `### Pull
+requests` / `### Branches` / `### Commits` sub-sections, each becoming its own
+chunk. `JiraIssue` gained `Id` — dev-status keys on the *numeric* issue id, not
+the ticket key. Both ingest routes carry it (`JiraCrawler` for `jira index`,
+`JiraCommand` for `jira watch`); `JiraCrawlResult` gained `Warnings` so a
+degradation is reported after the crawl instead of scrolling past in the
+spinner. Commit rendering caps at 20 with the overflow *stated* (§5).
+**The bug the unit tests caught before the live run:** `GetObject` yields an
+*Undefined* `JsonElement` for an absent category, and `TryGetProperty` on that
+**throws** rather than returning false — and a real summary payload omits
+`branch` entirely, so `PlanDevelopmentFetches` would have thrown on the first
+live ticket, breaking the never-throws promise. Fixed by checking `ValueKind`
+before reaching in, plus a parse-level guard as belt and braces.
+Verified live on **AEXP-19**: indexed 6 chunks with `1 PR(s), 1 commit(s)`;
+"which pull request implemented the fetch groups ticket" ranks
+`… > Development > Pull requests` **#1 at 0.98**; and a question answerable only
+from the commit body ("why are member counts loaded for the whole page instead
+of per row") ranks `… > Development > Commits` **#1 at 0.96** with the next hit
+at 0.00 — the rationale-in-commit-messages case the enhancement exists for. An
+epic with an empty panel (AEXP-221) costs one summary call and renders no
+section. Watch re-index carries the panel too (verified by backdating the
+monitor stamp). 289 tests (12 new).
 
 ### Phase 26 — Confluence integration: page pull + deep traversal + polling watch (§2.17) ✅ **Done**
 Confluence, the Jira model applied to a wiki of pages (§2.17). A configured

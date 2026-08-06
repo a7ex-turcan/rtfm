@@ -24,6 +24,12 @@ public sealed class JiraClient : IDisposable
 
     private readonly HttpClient _http;
 
+    // Latched off by the first *structural* dev-status failure (404/401/403 —
+    // the endpoint withdrawn, or the credential unable to read it). Without
+    // this, a 150-ticket crawl would repeat a doomed call 150 times and emit
+    // 150 identical warnings. Transient failures (timeouts, 5xx) do not latch.
+    private bool _devStatusAvailable = true;
+
     public JiraClient(JiraConfig config)
         : this(config, CreateHandler())
     {
@@ -133,6 +139,7 @@ public sealed class JiraClient : IDisposable
         return new JiraIssue(
             Key: GetString(root, "key") ?? key,
             Summary: GetString(fields, "summary") ?? key,
+            Id: GetString(root, "id"),
             Status: GetString(GetObject(fields, "status"), "name"),
             IssueType: GetString(GetObject(fields, "issuetype"), "name"),
             Reporter: GetString(GetObject(fields, "reporter"), "displayName"),
@@ -220,6 +227,254 @@ public sealed class JiraClient : IDisposable
         }
 
         return links;
+    }
+
+    /// <summary>
+    /// Pulls the ticket's <b>Development</b> panel — branches, pull requests, and
+    /// commits from the linked source host (GET only, like everything here).
+    ///
+    /// <para><b>This rides an undocumented endpoint.</b> <c>/rest/dev-status/</c>
+    /// is the internal API behind Jira's own Development panel: it is not part of
+    /// Atlassian's published REST surface and carries no compatibility promise,
+    /// unlike every other call in this client. It is therefore strictly
+    /// best-effort — <b>this method never throws</b>. Any failure warns and
+    /// yields <see cref="JiraDevelopment.None"/>, so a ticket still indexes
+    /// (minus its development data) if the endpoint changes or disappears.</para>
+    /// </summary>
+    /// <param name="issueId">The <em>numeric</em> issue id (<see cref="JiraIssue.Id"/>) — this API does not accept ticket keys.</param>
+    /// <param name="warn">Receives a human-readable reason when the data could not be read. Core stays host-agnostic (see this project's CLAUDE.md), so the caller decides where it goes.</param>
+    public async Task<JiraDevelopment> FetchDevelopmentAsync(
+        string? issueId,
+        Action<string>? warn = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(issueId) || !_devStatusAvailable)
+        {
+            return JiraDevelopment.None;
+        }
+
+        var id = Uri.EscapeDataString(issueId.Trim());
+
+        // The summary call is the cheap gate: it reports which categories have
+        // anything at all and which source hosts they live on, so a ticket with
+        // no development data costs exactly one request and no detail calls.
+        using var summary = await GetDevStatusAsync($"rest/dev-status/latest/issue/summary?issueId={id}", warn, cancellationToken).ConfigureAwait(false);
+        if (summary is null)
+        {
+            return JiraDevelopment.None;
+        }
+
+        // Parsing is guarded as well as fetching: this payload has no published
+        // schema, so an unfamiliar shape must degrade to "no development data"
+        // rather than break ingestion of an otherwise-fine ticket.
+        try
+        {
+            var fetches = PlanDevelopmentFetches(summary.RootElement);
+            if (fetches.Count == 0)
+            {
+                return JiraDevelopment.None;
+            }
+
+            var pullRequests = new List<JiraPullRequest>();
+            var branches = new List<JiraBranch>();
+            var commits = new List<JiraCommit>();
+
+            foreach (var (applicationType, dataType) in fetches)
+            {
+                var url = $"rest/dev-status/1.0/issue/detail?issueId={id}"
+                    + $"&applicationType={Uri.EscapeDataString(applicationType)}&dataType={dataType}";
+
+                using var detail = await GetDevStatusAsync(url, warn, cancellationToken).ConfigureAwait(false);
+                if (detail is not null)
+                {
+                    MergeDevelopmentDetail(detail.RootElement, pullRequests, branches, commits);
+                }
+            }
+
+            return new JiraDevelopment(pullRequests, branches, commits);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or JsonException or FormatException)
+        {
+            warn?.Invoke($"could not read development data: unexpected dev-status response shape ({ex.Message}) — indexing the ticket without it.");
+            return JiraDevelopment.None;
+        }
+    }
+
+    /// <summary>
+    /// Which <c>(applicationType, dataType)</c> detail calls the summary says are
+    /// worth making. Only two dataTypes are ever requested: <c>pullrequest</c>
+    /// (which returns branches alongside the PRs — <c>dataType=branch</c> was
+    /// measured to return a byte-identical payload) and <c>repository</c> (which
+    /// carries the commits). A category with a zero count is not fetched.
+    /// </summary>
+    internal static IReadOnlyList<(string ApplicationType, string DataType)> PlanDevelopmentFetches(JsonElement root)
+    {
+        var summary = GetObject(root, "summary");
+        if (summary.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        var planned = new List<(string, string)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Plan(string category, string dataType)
+        {
+            // A category can be absent entirely (a ticket with no branches has no
+            // "branch" node at all), and GetObject yields an *Undefined* element
+            // for that — on which TryGetProperty throws rather than returning
+            // false. Check the kind before reaching in.
+            var node = GetObject(summary, category);
+            var overall = GetObject(node, "overall");
+            var instances = GetObject(node, "byInstanceType");
+            if (overall.ValueKind != JsonValueKind.Object || instances.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (!overall.TryGetProperty("count", out var count)
+                || count.ValueKind != JsonValueKind.Number
+                || count.GetInt32() <= 0)
+            {
+                return;
+            }
+
+            foreach (var instance in instances.EnumerateObject())
+            {
+                if (seen.Add($"{instance.Name}|{dataType}"))
+                {
+                    planned.Add((instance.Name, dataType));
+                }
+            }
+        }
+
+        Plan("pullrequest", "pullrequest");
+        Plan("branch", "pullrequest");
+        Plan("repository", "repository");
+        return planned;
+    }
+
+    /// <summary>
+    /// Folds one detail response into the accumulating lists, de-duplicating
+    /// across instance types (the same PR can surface under more than one
+    /// category). Shape: <c>detail[].{pullRequests,branches,repositories[].commits}</c>.
+    /// </summary>
+    internal static void MergeDevelopmentDetail(
+        JsonElement root,
+        List<JiraPullRequest> pullRequests,
+        List<JiraBranch> branches,
+        List<JiraCommit> commits)
+    {
+        foreach (var block in GetArray(root, "detail"))
+        {
+            foreach (var pr in GetArray(block, "pullRequests"))
+            {
+                var name = GetString(pr, "name") ?? GetString(pr, "id") ?? "(untitled pull request)";
+                var url = GetString(pr, "url");
+                if (pullRequests.Any(existing => existing.Url == url && existing.Name == name))
+                {
+                    continue;
+                }
+
+                var reviewers = new List<JiraReviewer>();
+                foreach (var reviewer in GetArray(pr, "reviewers"))
+                {
+                    if (GetString(reviewer, "name") is { } reviewerName)
+                    {
+                        reviewers.Add(new JiraReviewer(
+                            reviewerName,
+                            reviewer.TryGetProperty("approved", out var approved) && approved.ValueKind == JsonValueKind.True));
+                    }
+                }
+
+                pullRequests.Add(new JiraPullRequest(
+                    Name: name,
+                    Status: GetString(pr, "status"),
+                    Author: GetString(GetObject(pr, "author"), "name"),
+                    SourceBranch: GetString(GetObject(pr, "source"), "branch"),
+                    DestinationBranch: GetString(GetObject(pr, "destination"), "branch"),
+                    Repository: GetString(pr, "repositoryName"),
+                    Url: url,
+                    LastUpdate: JiraDate.Parse(GetString(pr, "lastUpdate")),
+                    Reviewers: reviewers));
+            }
+
+            foreach (var branch in GetArray(block, "branches"))
+            {
+                var name = GetString(branch, "name");
+                var repository = GetString(GetObject(branch, "repository"), "name");
+                if (name is null || branches.Any(existing => existing.Name == name && existing.Repository == repository))
+                {
+                    continue;
+                }
+
+                branches.Add(new JiraBranch(name, repository, GetString(branch, "url")));
+            }
+
+            foreach (var repository in GetArray(block, "repositories"))
+            {
+                var repositoryName = GetString(repository, "name");
+                foreach (var commit in GetArray(repository, "commits"))
+                {
+                    var commitId = GetString(commit, "id");
+                    if (commitId is null || commits.Any(existing => existing.Id == commitId))
+                    {
+                        continue;
+                    }
+
+                    commits.Add(new JiraCommit(
+                        Id: commitId,
+                        DisplayId: GetString(commit, "displayId") ?? commitId[..Math.Min(7, commitId.Length)],
+                        Author: GetString(GetObject(commit, "author"), "name"),
+                        AuthoredAt: JiraDate.Parse(GetString(commit, "authorTimestamp")),
+                        Message: GetString(commit, "message"),
+                        Url: GetString(commit, "url"),
+                        Repository: repositoryName,
+                        Merge: commit.TryGetProperty("merge", out var merge) && merge.ValueKind == JsonValueKind.True));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// One best-effort dev-status GET. Returns null on any failure, having warned.
+    /// A 404/401/403 means the endpoint is gone or unreadable by this credential,
+    /// so it also latches <c>_devStatusAvailable</c> off for the rest of this
+    /// client's life — one warning per run, not one per ticket.
+    /// </summary>
+    private async Task<JsonDocument?> GetDevStatusAsync(string url, Action<string>? warn, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized
+                or HttpStatusCode.Forbidden or HttpStatusCode.Gone)
+            {
+                _devStatusAvailable = false;
+                warn?.Invoke(
+                    $"Jira development data is unavailable (HTTP {(int)response.StatusCode} from the dev-status endpoint) — "
+                    + "tickets will be indexed without their Development panel.");
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                warn?.Invoke($"could not read development data (HTTP {(int)response.StatusCode}) — indexing the ticket without it.");
+                return null;
+            }
+
+            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                warn?.Invoke($"could not read development data: {ex.Message} — indexing the ticket without it.");
+            }
+
+            return null;
+        }
     }
 
     /// <summary>

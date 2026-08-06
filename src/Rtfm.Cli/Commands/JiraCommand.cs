@@ -287,6 +287,14 @@ internal static class JiraCommand
         {
             Ui.Err.MarkupLine($"[dim]{result.Skipped.Count} linked ticket(s) skipped (deleted or no permission): {Ui.E(string.Join(", ", result.Skipped.Take(8)))}{(result.Skipped.Count > 8 ? "…" : "")}[/]");
         }
+
+        // Degradations, not failures: the tickets indexed, just with less on
+        // them. Said out loud so a thinner index is never mistaken for a
+        // complete one.
+        foreach (var warning in result.Warnings)
+        {
+            Ui.Err.MarkupLine($"[yellow]Warning:[/] {Ui.E(warning)}");
+        }
     }
 
     /// <summary>Minimum poll interval — a floor so a stray <c>--interval 1</c> can't hammer the API.</summary>
@@ -425,7 +433,11 @@ internal static class JiraCommand
             try
             {
                 var issue = await client.FetchIssueAsync(key, includeComments: entry.Full, cancellationToken).ConfigureAwait(false);
-                var rendered = renderer.Render(issue, config.BaseUrl, now);
+                var development = await client.FetchDevelopmentAsync(
+                    issue.Id,
+                    warn: msg => Ui.Err.MarkupLine($"[yellow]{stamp}[/]  {Ui.E(msg)}"),
+                    cancellationToken).ConfigureAwait(false);
+                var rendered = renderer.Render(issue, config.BaseUrl, now, development);
                 var n = await ingestor.IngestDocumentAsync(
                     JiraSource.Key(issue.Key), rendered.Markdown, rendered.Title, rendered.ModifiedAt, project, now, cancellationToken).ConfigureAwait(false);
                 monitor.Set(new MonitoredTicket(issue.Key, issue.Updated, entry.Full));
