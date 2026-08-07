@@ -65,8 +65,26 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
         return client.SearchPagesAsync(cql + " ORDER BY created asc", budget, warn, cancellationToken);
     }
 
-    public async Task<ConfluenceCrawlResult> CrawlAsync(
+    /// <summary>Convenience overload for the single-seed case.</summary>
+    public Task<ConfluenceCrawlResult> CrawlAsync(
         ConfluenceSeed seed,
+        string baseUrl,
+        DateTimeOffset pulledAt,
+        ConfluenceCrawlOptions options,
+        Action<string>? log = null,
+        CancellationToken cancellationToken = default)
+        => CrawlAsync([seed], baseUrl, pulledAt, options, log, cancellationToken);
+
+    /// <summary>
+    /// Crawls one or more seeds as a <b>single</b> run: their scopes are resolved
+    /// in turn but share one visited-set, one budget, and one result. That
+    /// sharing is the point of taking a list rather than looping outside — a page
+    /// reachable from two seeds is fetched once, and
+    /// <see cref="ConfluenceCrawlOptions.MaxPages"/> stays a ceiling on the run
+    /// instead of silently becoming "per seed" (N spaces × the budget).
+    /// </summary>
+    public async Task<ConfluenceCrawlResult> CrawlAsync(
+        IReadOnlyList<ConfluenceSeed> seeds,
         string baseUrl,
         DateTimeOffset pulledAt,
         ConfluenceCrawlOptions options,
@@ -87,21 +105,34 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
             log?.Invoke(message);
         }
 
-        // Resolve the *full* scope (CQL returns only ids/titles, so this is cheap
-        // even for hundreds of pages), not just `budget` of it — otherwise a
-        // 60-page folder with --max-pages 8 would index 8 and silently drop 52.
-        // Everything past the budget stays queued and is reported as Dropped (§5).
-        var scope = await ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, Warn, cancellationToken).ConfigureAwait(false);
-        log?.Invoke($"resolved scope: {scope.Count} page(s)");
-
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var queue = new Queue<(string Id, int Depth)>();
-        foreach (var (id, _) in scope)
+        var scopeCount = 0;
+
+        // Resolve each seed's *full* scope (CQL returns only ids/titles, so this
+        // is cheap even for hundreds of pages), not just `budget` of it —
+        // otherwise a 60-page folder with --max-pages 8 would index 8 and
+        // silently drop 52. Everything past the budget stays queued and is
+        // reported as Dropped (§5). Seeds share the visited-set, so a page in two
+        // scopes is counted and fetched once.
+        foreach (var seed in seeds)
         {
-            if (visited.Add(id))
+            var scope = await ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, Warn, cancellationToken).ConfigureAwait(false);
+            log?.Invoke($"resolved {seed.Kind.ToString().ToLowerInvariant()} {seed.Value}: {scope.Count} page(s)");
+
+            foreach (var (id, _) in scope)
             {
-                queue.Enqueue((id, 0));
+                if (visited.Add(id))
+                {
+                    queue.Enqueue((id, 0));
+                    scopeCount++;
+                }
             }
+        }
+
+        if (seeds.Count > 1)
+        {
+            log?.Invoke($"resolved scope: {scopeCount} unique page(s) across {seeds.Count} seeds");
         }
 
         var nodes = new List<ConfluenceCrawlNode>();
@@ -156,6 +187,6 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
         }
 
         var dropped = Math.Max(0, visited.Count - nodes.Count - skipped.Count);
-        return new ConfluenceCrawlResult(nodes, scope.Count, visited.Count, dropped, budgetHit, skipped, warnings);
+        return new ConfluenceCrawlResult(nodes, scopeCount, visited.Count, dropped, budgetHit, skipped, warnings);
     }
 }

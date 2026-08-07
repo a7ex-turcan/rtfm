@@ -39,7 +39,7 @@ internal static class ConfluenceCommand
             usage: rtfm confluence config --url <workspace> --email <you> [--token-env CONFLUENCE_TOKEN]
                                           [--project <name>] [--max-depth <n>] [--max-pages <n>] [--poll <seconds>]
                    rtfm confluence index <PAGE|FOLDER|SPACE-URL | page-id> [--project <name>]
-                                         [--space <KEY>] [--depth <n>] [--max-pages <n>] [--dry-run]
+                                         [--space <KEY>]... [--depth <n>] [--max-pages <n>] [--dry-run]
                    rtfm confluence watch [--project <name>] [--interval <seconds>] [--once]
                    rtfm confluence purge <PAGE-URL|id> [--project <name>]
                    rtfm confluence purge --all [--project <name>] [--yes]
@@ -47,6 +47,11 @@ internal static class ConfluenceCommand
 
             index accepts a page URL (page + its subtree), a folder URL (its subtree),
             a space URL or --space <KEY> (the whole space), or a bare page id.
+
+            --space is repeatable and combines with a URL/id, so several spaces
+            index in one run: --space PR --space PH. They share one visited-set and
+            one --max-pages budget, so overlapping pages are fetched once and the
+            budget stays a ceiling on the run rather than per space.
 
             The API token is read from the environment variable named by --token-env
             (default CONFLUENCE_TOKEN); only the reference is stored, never the token.
@@ -128,7 +133,8 @@ internal static class ConfluenceCommand
 
     private static async Task<int> IndexAsync(string[] args)
     {
-        string? input = null, project = null, space = null;
+        string? input = null, project = null;
+        var spaces = new List<string>();
         int? depth = null, maxPages = null;
         var dryRun = false;
 
@@ -137,7 +143,7 @@ internal static class ConfluenceCommand
             switch (args[i])
             {
                 case "--project" or "-p" when i + 1 < args.Length: project = args[++i]; break;
-                case "--space" when i + 1 < args.Length: space = args[++i]; break;
+                case "--space" when i + 1 < args.Length: spaces.Add(args[++i]); break;
                 case "--depth" when i + 1 < args.Length && int.TryParse(args[i + 1], out var d): depth = d; i++; break;
                 case "--max-pages" when i + 1 < args.Length && int.TryParse(args[i + 1], out var m): maxPages = m; i++; break;
                 case "--dry-run": dryRun = true; break;
@@ -149,10 +155,26 @@ internal static class ConfluenceCommand
             }
         }
 
-        var seed = ConfluenceSource.ParseSeed(input ?? string.Empty, space);
-        if (seed is null)
+        // --space is repeatable and combines with a positional seed; they all
+        // become one crawl (shared visited-set and budget, §ConfluenceCrawler).
+        // Duplicates collapse so `--space PH --space ph` is one space.
+        var seeds = spaces
+            .Select(key => new ConfluenceSeed(ConfluenceSeedKind.Space, key.Trim()))
+            .Where(s => s.Value.Length > 0)
+            .ToList();
+
+        if (ConfluenceSource.ParseSeed(input ?? string.Empty) is { } positional)
         {
-            Ui.Err.MarkupLine("[red]Nothing to index.[/] Pass a page/folder/space URL, a numeric page id, or [italic]--space <KEY>[/].");
+            seeds.Insert(0, positional);
+        }
+
+        seeds = seeds
+            .DistinctBy(s => (s.Kind, s.Value.ToUpperInvariant()))
+            .ToList();
+
+        if (seeds.Count == 0)
+        {
+            Ui.Err.MarkupLine("[red]Nothing to index.[/] Pass a page/folder/space URL, a numeric page id, or [italic]--space <KEY>[/] (repeatable).");
             return Usage();
         }
 
@@ -177,11 +199,28 @@ internal static class ConfluenceCommand
             if (dryRun)
             {
                 var scopeWarnings = new List<string>();
-                var scope = await Ui.Err.Status().Spinner(Spinner.Known.Dots)
-                    .StartAsync(
-                        $"Resolving {seed.Kind.ToString().ToLowerInvariant()} scope…",
-                        _ => crawler.ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, scopeWarnings.Add));
-                RenderScopePlan(scope, seed, options);
+                var union = new HashSet<string>(StringComparer.Ordinal);
+
+                foreach (var seed in seeds)
+                {
+                    var scope = await Ui.Err.Status().Spinner(Spinner.Known.Dots)
+                        .StartAsync(
+                            $"Resolving {seed.Kind.ToString().ToLowerInvariant()} {Ui.E(seed.Value)} scope…",
+                            _ => crawler.ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, scopeWarnings.Add));
+
+                    RenderScopePlan(scope, seed, options, showTotals: seeds.Count == 1);
+                    union.UnionWith(scope.Select(s => s.Id));
+                }
+
+                // With several seeds the per-seed counts don't add up to the run
+                // (a page in two scopes is crawled once), so state the union.
+                if (seeds.Count > 1)
+                {
+                    var willIndex = Math.Min(union.Count, options.MaxPages);
+                    Ui.Err.MarkupLine($"[dim]{union.Count} unique in-scope page(s) across {seeds.Count} seeds; this run would index {willIndex}[/]"
+                        + (union.Count > options.MaxPages ? $" [yellow](budget {options.MaxPages} — raise --max-pages for the rest)[/]" : "")
+                        + $"[dim], then follow in-body links up to depth {options.MaxDepth}.[/]");
+                }
 
                 // A preview that under-reports the scope is worse than no preview.
                 foreach (var warning in scopeWarnings.Distinct(StringComparer.Ordinal))
@@ -196,11 +235,12 @@ internal static class ConfluenceCommand
             // Terminal-tab progress, so a long crawl stays legible when the
             // window is buried. Disposed → prior title restored.
             using var title = new TerminalTitle();
-            title.Reconciling($"crawling {seed.Value}");
+            var label = Describe(seeds);
+            title.Reconciling($"crawling {label}");
 
             var result = await Ui.Err.Status().Spinner(Spinner.Known.Dots)
-                .StartAsync($"Crawling {seed.Kind.ToString().ToLowerInvariant()} {Ui.E(seed.Value)} (links depth ≤ {options.MaxDepth})…",
-                    async ctx => await crawler.CrawlAsync(seed, config.BaseUrl, indexedAt, options,
+                .StartAsync($"Crawling {Ui.E(label)} (links depth ≤ {options.MaxDepth})…",
+                    async ctx => await crawler.CrawlAsync(seeds, config.BaseUrl, indexedAt, options,
                         log: msg =>
                         {
                             ctx.Status($"[dim]{Ui.E(msg)}[/]");
@@ -211,7 +251,7 @@ internal static class ConfluenceCommand
 
             if (result.Nodes.Count == 0)
             {
-                Ui.Err.MarkupLine($"[red]No pages indexed[/] for {seed.Kind.ToString().ToLowerInvariant()} [bold]{Ui.E(seed.Value)}[/]"
+                Ui.Err.MarkupLine($"[red]No pages indexed[/] for {Ui.E(label)}"
                     + (result.Skipped.Count > 0 ? $" [dim]({result.Skipped.Count} skipped)[/]" : "") + ".");
                 return 1;
             }
@@ -277,7 +317,20 @@ internal static class ConfluenceCommand
         }
     }
 
-    private static void RenderScopePlan(IReadOnlyList<(string Id, string Title)> scope, ConfluenceSeed seed, ConfluenceCrawlOptions options)
+    /// <summary>Human label for the seed set: "space PH" for one, "3 seeds (space PR, space PH, …)" for several.</summary>
+    private static string Describe(IReadOnlyList<ConfluenceSeed> seeds)
+    {
+        var parts = seeds.Select(s => $"{s.Kind.ToString().ToLowerInvariant()} {s.Value}").ToList();
+        return parts.Count == 1
+            ? parts[0]
+            : $"{parts.Count} seeds ({string.Join(", ", parts.Take(3))}{(parts.Count > 3 ? ", …" : "")})";
+    }
+
+    private static void RenderScopePlan(
+        IReadOnlyList<(string Id, string Title)> scope,
+        ConfluenceSeed seed,
+        ConfluenceCrawlOptions options,
+        bool showTotals = true)
     {
         var table = new Table()
             .Border(TableBorder.Rounded)
@@ -298,6 +351,15 @@ internal static class ConfluenceCommand
         }
 
         Ui.Err.Write(table);
+
+        // With several seeds the run-level totals are printed once by the
+        // caller, over the union — per-seed counts would double-count overlap.
+        if (!showTotals)
+        {
+            Ui.Err.MarkupLine($"[dim]{scope.Count} page(s) in {seed.Kind.ToString().ToLowerInvariant()} {Ui.E(seed.Value)}.[/]");
+            return;
+        }
+
         var willIndex = Math.Min(scope.Count, options.MaxPages);
         Ui.Err.MarkupLine($"[dim]{scope.Count} in-scope page(s); this run would index {willIndex}[/]"
             + (scope.Count > options.MaxPages ? $" [yellow](budget {options.MaxPages} — raise --max-pages for the rest)[/]" : "")

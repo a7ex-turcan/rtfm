@@ -587,6 +587,14 @@ tracker of tickets.
   key is `confluence://{pageId}` built by `ConfluenceSource.Key` (again *not*
   through `PathNormalizer`). Same workspace URL + email as Jira; kept a separate
   config so the two products stay independent.
+- **Several seeds crawl as one run, not N runs.** `--space` is repeatable and
+  combines with a URL/id (`--space PR --space PH`), and the crawler takes a
+  seed *list* rather than the caller looping. The sharing is the point: one
+  visited-set means a page reachable from two scopes is fetched and counted
+  once, and one budget means `--max-pages` stays a ceiling on the **run**
+  instead of silently becoming a per-seed allowance (N spaces × the ceiling).
+  Per-seed scope counts are still shown, but the run total is the *union* —
+  reporting the sum would double-count overlap.
 - **The seed is a *page*, led by its URL; a whole *space* is the bulk option.**
   Confluence has no single atomic unit like a ticket — knowledge lives in a
   tree of pages inside spaces. So `rtfm confluence index <URL|id>` seeds from
