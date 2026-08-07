@@ -14,6 +14,31 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.11.0] - 2026-08-07
+
+### Added
+- **`rtfm confluence index --space` is repeatable**, so several spaces index in
+  one command instead of one run each:
+
+  ```bash
+  rtfm confluence index --space PR --space PH --project myproject
+  ```
+
+  It also combines with a page/folder/space URL or id, and duplicate keys
+  collapse (`--space PR --space pr` is one space).
+
+  Multiple seeds crawl as **one run**, not several — they share a visited-set
+  and a budget. That matters beyond keystrokes: a page reachable from two
+  scopes is fetched and counted once, and `--max-pages` stays a ceiling on the
+  whole run rather than quietly becoming a per-space allowance (which is what
+  running the command twice gives you). The `--dry-run` preview shows each
+  seed's own count plus the union, because the per-seed numbers don't sum to
+  the run when scopes overlap.
+
+  Verified against two real spaces of 446 and 407 pages: 853 unique in-scope
+  pages across the pair, `--max-pages 10` indexing 10 for the run rather than
+  10 per space, and a bounded run reporting the 847 it did not follow.
+
 ## [1.10.2] - 2026-08-07
 
 ### Fixed
