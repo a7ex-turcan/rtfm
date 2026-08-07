@@ -111,7 +111,7 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
             // to the seed the way comment fidelity is gated would make the
             // feature miss its most common case. It costs one extra request for
             // a ticket with no development data, two or three for one with.
-            var development = await client.FetchDevelopmentAsync(issue.Id, Warn, cancellationToken).ConfigureAwait(false);
+            var development = await client.FetchDevelopmentAsync(issue.Id, issue.Key, Warn, cancellationToken).ConfigureAwait(false);
 
             var rendered = renderer.Render(issue, baseUrl, pulledAt, development);
             var canonical = issue.Key.ToUpperInvariant();

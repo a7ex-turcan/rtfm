@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Rtfm.Core.Jira;
 
@@ -201,6 +202,92 @@ public class JiraDevelopmentTests
         Assert.Single(development.PullRequests);
         Assert.Single(development.Branches);
         Assert.Single(development.Commits);
+    }
+
+    [Theory]
+    [InlineData("AEXP-19", "AEXP")]
+    [InlineData("cem-231", "CEM")]
+    [InlineData("NOTAKEY", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void Project_is_read_off_the_ticket_key(string? key, string? expected)
+        => Assert.Equal(expected, JiraClient.ProjectOf(key));
+
+    /// <summary>
+    /// The regression that shipped in 1.10.0: <c>View Development Tools</c> is a
+    /// <b>per-project</b> permission, but a 403 latched the whole feature off —
+    /// so one cross-project link into an inaccessible project stripped the
+    /// Development panel from every ticket crawled after it, while reporting the
+    /// endpoint as globally unavailable.
+    /// </summary>
+    [Fact]
+    public async Task A_forbidden_project_does_not_disable_the_others()
+    {
+        var handler = new PerProjectHandler { ForbiddenIssueId = "2000" };
+        using var client = new JiraClient(new JiraConfig("https://x.atlassian.net", "me@x.com", "tok"), handler);
+
+        var warnings = new List<string>();
+
+        // The forbidden ticket comes first, exactly as a cross-project link does.
+        var forbidden = await client.FetchDevelopmentAsync("2000", "CEM-231", warnings.Add);
+        var allowed = await client.FetchDevelopmentAsync("1000", "AEXP-19", warnings.Add);
+
+        Assert.True(forbidden.IsEmpty);
+        Assert.Single(allowed.PullRequests);          // <- the bug: this was empty
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("project CEM", warning, StringComparison.Ordinal);
+        Assert.Contains("other projects are unaffected", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_withdrawn_endpoint_still_latches_off_for_the_run()
+    {
+        // 404/401 really are global, so one warning and no further attempts.
+        var handler = new PerProjectHandler { NotFoundAlways = true };
+        using var client = new JiraClient(new JiraConfig("https://x.atlassian.net", "me@x.com", "tok"), handler);
+
+        var warnings = new List<string>();
+        await client.FetchDevelopmentAsync("1000", "AEXP-19", warnings.Add);
+        await client.FetchDevelopmentAsync("1001", "AEXP-20", warnings.Add);
+
+        Assert.Single(warnings);
+        Assert.Equal(1, handler.Requests);   // latched: the second ticket never called out
+    }
+
+    /// <summary>Serves dev-status per issue id, 403ing one of them like a closed project.</summary>
+    private sealed class PerProjectHandler : HttpMessageHandler
+    {
+        public string? ForbiddenIssueId { get; init; }
+
+        public bool NotFoundAlways { get; init; }
+
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests++;
+            var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query);
+
+            if (NotFoundAlways)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{}") });
+            }
+
+            if (query["issueId"] == ForbiddenIssueId)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("""{"errorMessages":["You do not have permission to perform the requested action"]}"""),
+                });
+            }
+
+            var body = request.RequestUri!.AbsolutePath.Contains("/summary", StringComparison.Ordinal)
+                ? SummaryWithPullRequestAndCommits
+                : PullRequestDetail;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        }
     }
 
     private static JiraIssue Issue() => new(

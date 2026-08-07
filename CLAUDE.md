@@ -537,9 +537,19 @@ class of thing, so reversing that for Jira is a decision, not a drive-by.
   **no published schema and no compatibility promise**, unlike every other call
   RTFM makes. So it is best-effort *by construction*:
   `JiraClient.FetchDevelopmentAsync` **never throws** (fetch *and* parse are
-  guarded), a 404/401/403 **latches it off for the rest of the run** — one
-  warning, not one per ticket — and the ticket still indexes, minus the
-  section. Cost is bounded at two calls: a `summary` gate (a ticket with no
+  guarded), a 401 (bad credential) or 404/410 (endpoint withdrawn) **latches it
+  off for the rest of the run** — one warning, not one per ticket — and the
+  ticket still indexes, minus the section. **A 403 does *not* latch**: `View
+  Development Tools` is a *per-project* permission, so 403 means "not this
+  project", not "not this endpoint". Lumping it in with the global failures was
+  a real bug (fixed in 1.11.1): one cross-project link into a project the
+  account can't see stripped the panel from every ticket crawled after it,
+  while reporting the endpoint as globally unavailable. The 403 warning now
+  names the project and dedupes to one line per project, and the crawl carries
+  on. Deliberately *not* skipping the rest of a forbidden project's tickets —
+  Jira also has issue-level security, so one 403 doesn't prove the project is
+  uniformly closed, and a wasted summary GET is cheaper than wrongly skipping
+  a readable ticket. Cost is bounded at two calls: a `summary` gate (a ticket with no
   development data costs exactly one request and no detail calls), then
   `detail` for `pullrequest` — which returns branches alongside the PRs, since
   `dataType=branch` was measured byte-identical — and `repository`, which

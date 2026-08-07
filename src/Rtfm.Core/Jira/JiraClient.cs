@@ -24,10 +24,12 @@ public sealed class JiraClient : IDisposable
 
     private readonly HttpClient _http;
 
-    // Latched off by the first *structural* dev-status failure (404/401/403 —
-    // the endpoint withdrawn, or the credential unable to read it). Without
-    // this, a 150-ticket crawl would repeat a doomed call 150 times and emit
-    // 150 identical warnings. Transient failures (timeouts, 5xx) do not latch.
+    // Latched off by the first *globally* structural dev-status failure — 401
+    // (bad credential) or 404/410 (endpoint withdrawn). Without it, a
+    // 150-ticket crawl would repeat a doomed call 150 times and emit 150
+    // identical warnings. Transient failures (timeouts, 5xx) do not latch, and
+    // neither does 403: that is a per-project permission, not a global one
+    // (see GetDevStatusAsync).
     private bool _devStatusAvailable = true;
 
     public JiraClient(JiraConfig config)
@@ -243,8 +245,13 @@ public sealed class JiraClient : IDisposable
     /// </summary>
     /// <param name="issueId">The <em>numeric</em> issue id (<see cref="JiraIssue.Id"/>) — this API does not accept ticket keys.</param>
     /// <param name="warn">Receives a human-readable reason when the data could not be read. Core stays host-agnostic (see this project's CLAUDE.md), so the caller decides where it goes.</param>
+    /// <param name="issueKey">
+    /// The ticket key (e.g. <c>AEXP-19</c>), used only to name the project in a
+    /// permission warning — the API itself keys on the numeric id.
+    /// </param>
     public async Task<JiraDevelopment> FetchDevelopmentAsync(
         string? issueId,
+        string? issueKey = null,
         Action<string>? warn = null,
         CancellationToken cancellationToken = default)
     {
@@ -258,7 +265,7 @@ public sealed class JiraClient : IDisposable
         // The summary call is the cheap gate: it reports which categories have
         // anything at all and which source hosts they live on, so a ticket with
         // no development data costs exactly one request and no detail calls.
-        using var summary = await GetDevStatusAsync($"rest/dev-status/latest/issue/summary?issueId={id}", warn, cancellationToken).ConfigureAwait(false);
+        using var summary = await GetDevStatusAsync($"rest/dev-status/latest/issue/summary?issueId={id}", issueKey, warn, cancellationToken).ConfigureAwait(false);
         if (summary is null)
         {
             return JiraDevelopment.None;
@@ -284,7 +291,7 @@ public sealed class JiraClient : IDisposable
                 var url = $"rest/dev-status/1.0/issue/detail?issueId={id}"
                     + $"&applicationType={Uri.EscapeDataString(applicationType)}&dataType={dataType}";
 
-                using var detail = await GetDevStatusAsync(url, warn, cancellationToken).ConfigureAwait(false);
+                using var detail = await GetDevStatusAsync(url, issueKey, warn, cancellationToken).ConfigureAwait(false);
                 if (detail is not null)
                 {
                     MergeDevelopmentDetail(detail.RootElement, pullRequests, branches, commits);
@@ -438,23 +445,48 @@ public sealed class JiraClient : IDisposable
 
     /// <summary>
     /// One best-effort dev-status GET. Returns null on any failure, having warned.
-    /// A 404/401/403 means the endpoint is gone or unreadable by this credential,
-    /// so it also latches <c>_devStatusAvailable</c> off for the rest of this
-    /// client's life — one warning per run, not one per ticket.
+    ///
+    /// <para><b>403 is local; 401/404/410 are global — and conflating them was a
+    /// bug.</b> <c>View Development Tools</c> is a <em>per-project</em> Jira
+    /// permission, so a 403 means "not this project", not "not this endpoint".
+    /// The original cut latched the whole feature off on any of these, so a
+    /// single cross-project link into a project the account can't see stripped
+    /// the Development panel from every ticket crawled after it — silently, and
+    /// while reporting the panel as globally unavailable. Only a bad credential
+    /// (401) or a withdrawn endpoint (404/410) latches now; a 403 warns once per
+    /// project and the crawl carries on.</para>
+    ///
+    /// <para>Deliberately <b>not</b> skipping the rest of a forbidden project's
+    /// tickets: Jira also has issue-level security, so a 403 on one ticket does
+    /// not prove the project is uniformly closed. One wasted summary GET per
+    /// affected ticket is far cheaper than wrongly skipping readable ones.</para>
     /// </summary>
-    private async Task<JsonDocument?> GetDevStatusAsync(string url, Action<string>? warn, CancellationToken cancellationToken)
+    private async Task<JsonDocument?> GetDevStatusAsync(string url, string? issueKey, Action<string>? warn, CancellationToken cancellationToken)
     {
         try
         {
             using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
 
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized
-                or HttpStatusCode.Forbidden or HttpStatusCode.Gone)
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound or HttpStatusCode.Gone)
             {
                 _devStatusAvailable = false;
                 warn?.Invoke(
                     $"Jira development data is unavailable (HTTP {(int)response.StatusCode} from the dev-status endpoint) — "
                     + "tickets will be indexed without their Development panel.");
+                return null;
+            }
+
+            if (response.StatusCode == HttpStatusCode.Forbidden)
+            {
+                // Scoped to the project, and phrased so it reads as one project's
+                // permission gap rather than a dead feature. The message is
+                // identical for every ticket in that project, so the caller's
+                // de-duplication collapses it to one line per project.
+                var scope = ProjectOf(issueKey) is { } project ? $"project {project}" : "this ticket";
+                warn?.Invoke(
+                    $"Jira development data for {scope} is not visible to this account (HTTP 403 — the "
+                    + "\"View Development Tools\" permission). Its tickets index without the Development panel; "
+                    + "other projects are unaffected.");
                 return null;
             }
 
@@ -639,6 +671,18 @@ public sealed class JiraClient : IDisposable
         }
 
         return keys;
+    }
+
+    /// <summary>The project part of a ticket key (<c>AEXP-19</c> → <c>AEXP</c>), or null if it isn't key-shaped.</summary>
+    internal static string? ProjectOf(string? issueKey)
+    {
+        if (string.IsNullOrWhiteSpace(issueKey))
+        {
+            return null;
+        }
+
+        var dash = issueKey.IndexOf('-');
+        return dash > 0 ? issueKey[..dash].Trim().ToUpperInvariant() : null;
     }
 
     private static HttpClientHandler CreateHandler() => new() { AutomaticDecompression = DecompressionMethods.All };

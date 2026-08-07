@@ -448,6 +448,7 @@ internal static class JiraCommand
                 var issue = await client.FetchIssueAsync(key, includeComments: entry.Full, cancellationToken).ConfigureAwait(false);
                 var development = await client.FetchDevelopmentAsync(
                     issue.Id,
+                    issue.Key,
                     warn: msg => Ui.Err.MarkupLine($"[yellow]{stamp}[/]  {Ui.E(msg)}"),
                     cancellationToken).ConfigureAwait(false);
                 var rendered = renderer.Render(issue, config.BaseUrl, now, development);
