@@ -14,6 +14,35 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.11.1] - 2026-08-07
+
+### Fixed
+- **One inaccessible Jira project no longer disables the Development panel for
+  every other project in a crawl.** `View Development Tools` is a *per-project*
+  permission, so the dev-status endpoint answers 403 for a project the account
+  can't see — but 1.10.0 treated that like a withdrawn endpoint and latched the
+  whole feature off for the rest of the run. A single cross-project issue link
+  into such a project therefore stripped the Development panel from every ticket
+  crawled after it, while the warning claimed the data was globally unavailable:
+
+  > Jira development data is unavailable (HTTP 403 from the dev-status endpoint)
+
+  Now only a 401 (bad credential) or 404/410 (endpoint withdrawn) latches — a
+  403 warns once per project and the crawl carries on:
+
+  > Jira development data for project CEM is not visible to this account
+  > (HTTP 403 — the "View Development Tools" permission). Its tickets index
+  > without the Development panel; other projects are unaffected.
+
+  The rest of a forbidden project's tickets are still attempted rather than
+  skipped: Jira also has issue-level security, so one 403 does not prove the
+  project is uniformly closed, and a wasted summary request is cheaper than
+  wrongly skipping a readable ticket.
+
+  Whether an existing index actually lost anything depends on crawl order — only
+  tickets pulled *after* the first 403 were affected. Re-index if a ticket you
+  expect to carry pull requests or commits is missing them.
+
 ## [1.11.0] - 2026-08-07
 
 ### Added
