@@ -177,11 +177,22 @@ internal static class JiraCommand
             var indexedAt = DateTimeOffset.UtcNow;
             var seed = key.Trim().ToUpperInvariant();
 
+            // Terminal-tab progress, so a long crawl stays legible when the
+            // window is buried. Disposed → prior title restored.
+            using var title = new TerminalTitle();
+            title.Reconciling($"crawling {seed}");
+
             var result = await Ui.Err.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync($"Crawling from {Ui.E(seed)} (depth ≤ {options.MaxDepth})…", async ctx =>
                     await crawler.CrawlAsync(seed, config.BaseUrl, indexedAt, options,
-                        log: msg => ctx.Status($"[dim]{Ui.E(msg)}[/]")).ConfigureAwait(false));
+                        log: msg =>
+                        {
+                            ctx.Status($"[dim]{Ui.E(msg)}[/]");
+                            // No total exists until the crawl finishes, so the
+                            // latest event is the honest progress signal here.
+                            title.Reconciling(msg);
+                        }).ConfigureAwait(false));
 
             if (result.Nodes.Count == 0)
             {
@@ -208,9 +219,11 @@ internal static class JiraCommand
                 .StartAsync(async pctx =>
                 {
                     var task = pctx.AddTask("[bold]Indexing tickets[/]", maxValue: result.Nodes.Count);
+                    var done = 0;
                     foreach (var node in result.Nodes)
                     {
                         task.Description = $"[bold]Indexing[/] [dim]{Ui.E(node.Key)}[/]";
+                        title.Progress(++done, result.Nodes.Count, $"indexing {node.Key}");
                         totalChunks += await ingestor.IngestDocumentAsync(
                             JiraSource.Key(node.Key), node.Rendered.Markdown, node.Rendered.Title, node.Rendered.ModifiedAt, project, indexedAt)
                             .ConfigureAwait(false);
