@@ -1,8 +1,9 @@
 namespace Rtfm.Cli;
 
 /// <summary>
-/// Sets the terminal tab/window title while a long-running command (currently
-/// <c>watch</c>) is active, with a small animated icon for a bonus sign-of-life.
+/// Sets the terminal tab/window title while a long-running command is active
+/// (<c>watch</c>, and the <c>jira</c>/<c>confluence</c> index crawls), with a
+/// small icon for a bonus sign-of-life.
 /// Emitted as an OSC&nbsp;0 escape (<c>ESC ] 0 ; text BEL</c>) on stderr — the
 /// same stream the watch dashboard uses — and only when stderr is an interactive
 /// terminal (<see cref="Ui.Fancy"/>), so redirected/piped output is never polluted
@@ -57,8 +58,38 @@ internal sealed class TerminalTitle : IDisposable
     /// <summary>Animated title: the icon advances with <paramref name="frame"/>.</summary>
     public void Animate(int frame, string text) => Write($"{_frames[frame % _frames.Length]} {text}");
 
-    /// <summary>Static "starting up / reconciling" title (hourglass, or ASCII fallback).</summary>
+    /// <summary>
+    /// Static "busy, no ratio to show yet" title (hourglass, or ASCII fallback):
+    /// <c>watch</c>'s startup reconcile, and the connector crawls, whose total is
+    /// unknown until the crawl finishes.
+    /// </summary>
     public void Reconciling(string text) => Write($"{(_unicode ? "⏳" : "*")} {text}");
+
+    /// <summary>Plain title, no icon.</summary>
+    public void Status(string text) => Write(text);
+
+    /// <summary>
+    /// Counted progress — a five-cell bar plus <c>done/total</c>, e.g.
+    /// <c>▰▰▰▱▱ 12/20 indexing AEXP-19</c>. Used by the connector index commands,
+    /// where the total is known once the crawl has produced its node list.
+    /// Degrades to <see cref="Status"/> when there is no meaningful total.
+    /// </summary>
+    public void Progress(int done, int total, string text)
+    {
+        if (total <= 0)
+        {
+            Status(text);
+            return;
+        }
+
+        const int cells = 5;
+        var filled = (int)Math.Round((double)Math.Clamp(done, 0, total) / total * cells);
+        var bar = _unicode
+            ? new string('▰', filled) + new string('▱', cells - filled)
+            : "[" + new string('#', filled) + new string('-', cells - filled) + "]";
+
+        Write($"{bar} {done}/{total} {text}");
+    }
 
     public void Dispose() => Write(_previous ?? string.Empty);
 
@@ -69,6 +100,11 @@ internal sealed class TerminalTitle : IDisposable
             return;
         }
 
-        Console.Error.Write(OscPrefix + title + Bel);
+        // A tab is a few dozen characters wide; a long Confluence page title
+        // would otherwise push everything useful out of view.
+        const int maxLength = 80;
+        var text = title.Length <= maxLength ? title : title[..(maxLength - 1)] + "…";
+
+        Console.Error.Write(OscPrefix + text + Bel);
     }
 }

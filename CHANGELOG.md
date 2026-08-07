@@ -14,6 +14,24 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.10.1] - 2026-08-07
+
+### Added
+- `rtfm jira index` and `rtfm confluence index` set the terminal tab/window
+  title while they run, so a long crawl shows its state from the tab alone when
+  the window is minimised or buried. The crawl phase shows the latest event
+  (`⏳ pulled AEXP-19 (depth 0, 1 PR(s), 3 commit(s))`) since no total exists
+  until it finishes; the indexing phase, where the total is known, shows a bar
+  and a ratio (`▰▰▰▱▱ 12/20 indexing AEXP-222`).
+
+  This extends the same helper `rtfm watch` has used since 1.3.2 rather than
+  adding a second mechanism, so the behaviour is identical: emitted as an OSC 0
+  escape on stderr and **only** when stderr is an interactive terminal —
+  redirected output is byte-for-byte unchanged — with the prior title restored
+  on exit, including on Ctrl+C. Terminals Spectre reports as non-unicode get an
+  ASCII bar. Titles are now capped at 80 characters, so a long Confluence page
+  title can't push everything useful out of the tab.
+
 ## [1.10.0] - 2026-08-06
 
 ### Added
