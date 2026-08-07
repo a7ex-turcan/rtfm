@@ -9,13 +9,20 @@ public sealed record ConfluenceCrawlOptions(int MaxDepth, int MaxPages);
 public sealed record ConfluenceCrawlNode(string PageId, int Depth, ConfluencePage Page, RenderedConfluenceDocument Rendered);
 
 /// <summary>The outcome of a crawl: what to index, and what the leash/scoping cut.</summary>
+/// <param name="Warnings">
+/// Non-fatal degradations, de-duplicated — chiefly a scope enumeration that
+/// ended early, which makes <see cref="ScopeCount"/> a floor rather than the
+/// truth. The crawl succeeded; the caller must surface these so an incomplete
+/// index is never mistaken for a complete one (§5).
+/// </param>
 public sealed record ConfluenceCrawlResult(
     IReadOnlyList<ConfluenceCrawlNode> Nodes,
     int ScopeCount,
     int Discovered,
     int Dropped,
     bool BudgetHit,
-    IReadOnlyList<string> Skipped);
+    IReadOnlyList<string> Skipped,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>
 /// Traverses a Confluence seed's neighbourhood (§2.17 Phase 26 step 2). The
@@ -36,7 +43,11 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
     /// budget-capped. Used both for <c>--dry-run</c> preview and as the crawl's
     /// depth-0 set.
     /// </summary>
-    public Task<IReadOnlyList<(string Id, string Title)>> ResolveScopeAsync(ConfluenceSeed seed, int budget, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<(string Id, string Title)>> ResolveScopeAsync(
+        ConfluenceSeed seed,
+        int budget,
+        Action<string>? warn = null,
+        CancellationToken cancellationToken = default)
     {
         var cql = seed.Kind switch
         {
@@ -48,7 +59,10 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
             _ => $"space = \"{seed.Value}\" AND type = page",
         };
 
-        return client.SearchPagesAsync(cql, budget, cancellationToken);
+        // Explicit ordering: CQL's default order is unspecified, so without this
+        // a budget-truncated scope would cut a different arbitrary subset each
+        // run. Oldest-first at least makes "the first N" mean something stable.
+        return client.SearchPagesAsync(cql + " ORDER BY created asc", budget, warn, cancellationToken);
     }
 
     public async Task<ConfluenceCrawlResult> CrawlAsync(
@@ -62,11 +76,22 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
         var maxDepth = Math.Max(0, options.MaxDepth);
         var budget = Math.Max(1, options.MaxPages);
 
+        var warnings = new List<string>();
+        void Warn(string message)
+        {
+            if (!warnings.Contains(message, StringComparer.Ordinal))
+            {
+                warnings.Add(message);
+            }
+
+            log?.Invoke(message);
+        }
+
         // Resolve the *full* scope (CQL returns only ids/titles, so this is cheap
         // even for hundreds of pages), not just `budget` of it — otherwise a
         // 60-page folder with --max-pages 8 would index 8 and silently drop 52.
         // Everything past the budget stays queued and is reported as Dropped (§5).
-        var scope = await ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, Warn, cancellationToken).ConfigureAwait(false);
         log?.Invoke($"resolved scope: {scope.Count} page(s)");
 
         var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -131,6 +156,6 @@ public sealed class ConfluenceCrawler(ConfluenceClient client, ConfluenceDocumen
         }
 
         var dropped = Math.Max(0, visited.Count - nodes.Count - skipped.Count);
-        return new ConfluenceCrawlResult(nodes, scope.Count, visited.Count, dropped, budgetHit, skipped);
+        return new ConfluenceCrawlResult(nodes, scope.Count, visited.Count, dropped, budgetHit, skipped, warnings);
     }
 }

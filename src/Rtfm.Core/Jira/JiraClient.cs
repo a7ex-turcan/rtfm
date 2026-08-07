@@ -584,7 +584,21 @@ public sealed class JiraClient : IDisposable
         return stamps;
     }
 
-    /// <summary>All project keys visible to the credential (GET only), for validating text-mention edges.</summary>
+    /// <summary>
+    /// All project keys visible to the credential (GET only), for validating
+    /// text-mention edges.
+    ///
+    /// <para><b>Do not add <c>&amp;keys=true</c>.</b> On
+    /// <c>/rest/api/3/project/search</c>, <c>keys</c> is a <em>filter by project
+    /// key</em>, not a "return only the keys" projection — passing <c>true</c>
+    /// filtered the search down to a project literally keyed <c>true</c> and
+    /// returned an empty set, every time. Because an empty set makes
+    /// mention-following a silent no-op (the crawler only follows a mention
+    /// whose prefix is a known key), <c>--follow-mentions</c> did nothing at all
+    /// rather than failing visibly. Paging here <em>is</em> ordinary
+    /// <c>startAt</c>/<c>isLast</c> — unlike Confluence's content search
+    /// (§2.17), this endpoint honours the offset.</para>
+    /// </summary>
     public async Task<IReadOnlySet<string>> FetchProjectKeysAsync(CancellationToken cancellationToken = default)
     {
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -594,7 +608,7 @@ public sealed class JiraClient : IDisposable
         {
             while (true)
             {
-                using var response = await _http.GetAsync($"rest/api/3/project/search?maxResults=100&startAt={startAt}&keys=true", cancellationToken).ConfigureAwait(false);
+                using var response = await _http.GetAsync($"rest/api/3/project/search?maxResults=100&startAt={startAt}", cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     break;

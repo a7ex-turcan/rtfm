@@ -14,6 +14,45 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.10.2] - 2026-08-07
+
+### Fixed
+- **Confluence space/subtree indexing stopped at 100 pages, silently.** Any
+  scope larger than one API page indexed only its first 100; the rest were
+  dropped with no error, and re-indexing could not recover them.
+  `/rest/api/content/search` **ignores** the `start` parameter, so offset paging
+  returned the same first page every time — and because each page came back
+  exactly `limit` long, the loop's "short page means done" exit never fired: it
+  ran to the ceiling instead, re-reading the same 100 ids ~50 times while the
+  crawler's visited set quietly absorbed the duplicates. Scope enumeration now
+  follows the `_links.next` cursor. Measured on a real 407-page space: **100
+  pages in ~50 requests → 407 pages in 5**.
+
+  `rtfm confluence watch`'s version probe shared the same code path. Its
+  client-side batching (≤100 ids per query) meant it never actually relied on
+  the offset, but a short response would have dropped those pages' versions and
+  left the watcher permanently blind to their edits — closed at the same time.
+
+  Scope queries also gained an explicit `ORDER BY created asc`, so a
+  `--max-pages`-truncated scope is a stable subset rather than an arbitrary one
+  per run; and an enumeration that ends early (an HTTP failure partway through)
+  now **reports** that the listing is incomplete instead of passing as
+  complete — on `--dry-run` too, where an under-reported preview is worse than
+  none.
+
+  **Re-index required:** a corpus indexed from a space or subtree of more than
+  100 pages is missing content, and re-indexing on an older build could not fix
+  it. Re-run `rtfm confluence index` once on this version.
+
+- **`rtfm jira index --follow-mentions` silently followed nothing.** The project
+  lookup that validates `KEY-123` mentions passed `keys=true` to
+  `/rest/api/3/project/search`, where `keys` is a *filter by project key*, not a
+  "return only the keys" projection — so it filtered the search to a project
+  literally keyed `true` and always came back empty. An empty key set makes
+  mention-following a no-op, so the flag did nothing rather than failing
+  visibly. On the workspace this was found against, the lookup goes from 0
+  projects to 342.
+
 ## [1.10.1] - 2026-08-07
 
 ### Added

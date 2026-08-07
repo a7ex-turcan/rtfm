@@ -176,9 +176,19 @@ internal static class ConfluenceCommand
 
             if (dryRun)
             {
+                var scopeWarnings = new List<string>();
                 var scope = await Ui.Err.Status().Spinner(Spinner.Known.Dots)
-                    .StartAsync($"Resolving {seed.Kind.ToString().ToLowerInvariant()} scope…", _ => crawler.ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling));
+                    .StartAsync(
+                        $"Resolving {seed.Kind.ToString().ToLowerInvariant()} scope…",
+                        _ => crawler.ResolveScopeAsync(seed, ConfluenceConfig.MaxPagesCeiling, scopeWarnings.Add));
                 RenderScopePlan(scope, seed, options);
+
+                // A preview that under-reports the scope is worse than no preview.
+                foreach (var warning in scopeWarnings.Distinct(StringComparer.Ordinal))
+                {
+                    Ui.Err.MarkupLine($"[yellow]Warning:[/] {Ui.E(warning)}");
+                }
+
                 Ui.Err.MarkupLine("[yellow]Dry run — nothing indexed.[/] Drop [italic]--dry-run[/] to index this set (plus in-body links).");
                 return 0;
             }
@@ -305,6 +315,13 @@ internal static class ConfluenceCommand
         {
             Ui.Err.MarkupLine($"[dim]{result.Skipped.Count} item(s) skipped (folder/whiteboard, deleted, or no permission).[/]");
         }
+
+        // Degradations, not failures: the pages that were found did index. Said
+        // out loud so a partial scope is never read as a complete one.
+        foreach (var warning in result.Warnings)
+        {
+            Ui.Err.MarkupLine($"[yellow]Warning:[/] {Ui.E(warning)}");
+        }
     }
 
     /// <summary>Minimum poll interval — a floor so a stray <c>--interval 1</c> can't hammer the API.</summary>
@@ -418,7 +435,10 @@ internal static class ConfluenceCommand
         var now = DateTimeOffset.UtcNow;
         var stamp = now.ToLocalTime().ToString("HH:mm:ss");
 
-        var versions = await client.FetchVersionsAsync(monitor.Pages.Keys.ToList(), cancellationToken).ConfigureAwait(false);
+        var versions = await client.FetchVersionsAsync(
+            monitor.Pages.Keys.ToList(),
+            warn: msg => Ui.Err.MarkupLine($"[yellow]{stamp}[/]  {Ui.E(msg)}"),
+            cancellationToken).ConfigureAwait(false);
         var changed = monitor.SelectChanged(versions);
 
         if (changed.Count == 0)
