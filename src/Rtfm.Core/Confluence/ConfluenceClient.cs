@@ -176,59 +176,138 @@ public sealed partial class ConfluenceClient : IDisposable
 
     /// <summary>
     /// Runs a CQL content search and returns matching page id + title summaries
-    /// (GET only), paginated via <c>start</c>/<c>limit</c> up to
-    /// <paramref name="max"/>. This is how a seed's scope is resolved (§2.17
-    /// step 2) — <c>ancestor = {id}</c> flattens a page/folder subtree through
-    /// sub-folders in one query, <c>space = "{key}"</c> enumerates a whole space.
-    /// Failures return what was gathered rather than throwing.
+    /// (GET only), up to <paramref name="max"/>. This is how a seed's scope is
+    /// resolved (§2.17 step 2) — <c>ancestor = {id}</c> flattens a page/folder
+    /// subtree through sub-folders in one query, <c>space = "{key}"</c>
+    /// enumerates a whole space.
+    ///
+    /// <para><b>Cursor paging, never <c>start</c>.</b> Confluence Cloud's
+    /// <c>/rest/api/content/search</c> <b>silently ignores</b> the <c>start</c>
+    /// parameter: every request returns the same first page. Offset paging here
+    /// therefore capped every scope at 100 pages while looking like it had read
+    /// them all — the termination check never fired (each page came back exactly
+    /// <c>limit</c> long), so it also burned a request per 100 of the budget
+    /// re-reading the same ids. The only paging that works is following
+    /// <c>_links.next</c>, which carries an opaque cursor.</para>
     /// </summary>
-    public async Task<IReadOnlyList<(string Id, string Title)>> SearchPagesAsync(string cql, int max, CancellationToken cancellationToken = default)
+    /// <param name="warn">
+    /// Invoked when enumeration ends <em>early</em> — an HTTP failure or a
+    /// transport/JSON error partway through. The list is then a prefix of the
+    /// real scope, and the caller must say so rather than treat it as complete
+    /// (§5, "no silent caps").
+    /// </param>
+    public Task<IReadOnlyList<(string Id, string Title)>> SearchPagesAsync(
+        string cql,
+        int max,
+        Action<string>? warn = null,
+        CancellationToken cancellationToken = default)
+        => SearchByCursorAsync(
+            $"rest/api/content/search?cql={Uri.EscapeDataString(cql)}&limit=100",
+            max,
+            item => GetString(item, "id") is { } id ? (id, GetString(item, "title") ?? id) : default((string, string)?),
+            warn,
+            cancellationToken);
+
+    /// <summary>
+    /// Walks a v1 collection endpoint by following <c>_links.next</c> until it is
+    /// absent (or <paramref name="max"/> items are collected), projecting each
+    /// result with <paramref name="select"/>. <c>next</c> is a host-relative path
+    /// to be resolved against <c>_links.base</c> (which already ends in
+    /// <c>/wiki</c>), so it is combined rather than handed to the client's own
+    /// base address.
+    /// </summary>
+    private async Task<IReadOnlyList<T>> SearchByCursorAsync<T>(
+        string firstUrl,
+        int max,
+        Func<JsonElement, T?> select,
+        Action<string>? warn,
+        CancellationToken cancellationToken)
+        where T : struct
     {
-        var results = new List<(string, string)>();
-        var start = 0;
+        var results = new List<T>();
+        string? url = firstUrl;
+        var requests = 0;
+
+        // A cursor walk terminates when `next` disappears, but a server that
+        // kept handing one back forever would spin. The backstop is deliberately
+        // far above any real walk (`max` items at even 10 per page) *and* it
+        // warns when it fires — a tighter cap sized to the expected page count
+        // would silently truncate against a server returning short pages, which
+        // is precisely the bug this method exists to fix.
+        var maxRequests = Math.Max(20, (max / 10) + 2);
 
         try
         {
-            while (results.Count < max)
+            while (url is not null && results.Count < max && requests < maxRequests)
             {
-                var limit = Math.Min(100, max - results.Count);
-                var url = $"rest/api/content/search?cql={Uri.EscapeDataString(cql)}&limit={limit}&start={start}";
-
                 using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+                requests++;
+
                 if (!response.IsSuccessStatusCode)
                 {
+                    warn?.Invoke($"Confluence returned HTTP {(int)response.StatusCode} after {results.Count} result(s) — the listing is incomplete.");
+                    url = null;   // already reported; don't warn twice below
                     break;
                 }
 
                 using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-                var page = GetArray(doc.RootElement, "results");
-                if (page.Count == 0)
-                {
-                    break;
-                }
 
-                foreach (var item in page)
+                foreach (var item in GetArray(doc.RootElement, "results"))
                 {
-                    if (GetString(item, "id") is { } id)
+                    if (results.Count >= max)
                     {
-                        results.Add((id, GetString(item, "title") ?? id));
+                        break;
+                    }
+
+                    if (select(item) is { } projected)
+                    {
+                        results.Add(projected);
                     }
                 }
 
-                if (page.Count < limit)
-                {
-                    break;
-                }
+                url = NextUrl(doc.RootElement);
+            }
 
-                start += limit;
+            // Stopped with more to read, and not because the caller's own limit
+            // was reached: say so rather than return a quiet prefix.
+            if (url is not null && results.Count < max)
+            {
+                warn?.Invoke($"stopped after {requests} requests with more Confluence results pending — the listing is incomplete.");
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            // Partial result — the caller crawls what it got.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                warn?.Invoke($"could not finish reading Confluence results after {results.Count} — {ex.Message}. The listing is incomplete.");
+            }
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// The absolute URL of the next page, or null at the end of the collection.
+    /// <c>_links.next</c> is relative (e.g. <c>/rest/api/content/search?…cursor=…</c>)
+    /// and belongs to <c>_links.base</c>; falling back to trimming a leading
+    /// <c>/wiki</c> keeps it working against the client's own base address if a
+    /// response ever omits <c>base</c>.
+    /// </summary>
+    private static string? NextUrl(JsonElement root)
+    {
+        var links = GetObject(root, "_links");
+        if (GetString(links, "next") is not { Length: > 0 } next)
+        {
+            return null;
+        }
+
+        if (GetString(links, "base") is { Length: > 0 } baseUrl)
+        {
+            return baseUrl.TrimEnd('/') + "/" + next.TrimStart('/');
+        }
+
+        var relative = next.TrimStart('/');
+        return relative.StartsWith("wiki/", StringComparison.OrdinalIgnoreCase) ? relative[5..] : relative;
     }
 
     // Comment expand: rendered body, the inline anchor (originalSelection) and
@@ -314,38 +393,38 @@ public sealed partial class ConfluenceClient : IDisposable
     /// back missing (deleted or no longer visible) is simply absent from the
     /// result. Failures return what was gathered.
     /// </summary>
-    public async Task<IReadOnlyDictionary<string, int?>> FetchVersionsAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyDictionary<string, int?>> FetchVersionsAsync(
+        IReadOnlyCollection<string> ids,
+        Action<string>? warn = null,
+        CancellationToken cancellationToken = default)
     {
         var versions = new Dictionary<string, int?>(StringComparer.Ordinal);
         var ordered = ids.Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.Ordinal).ToList();
 
-        try
+        for (var start = 0; start < ordered.Count; start += 100)
         {
-            for (var start = 0; start < ordered.Count; start += 100)
+            var batch = ordered.Skip(start).Take(100).ToList();
+            var cql = "id in (" + string.Join(",", batch) + ")";
+            var url = $"rest/api/content/search?cql={Uri.EscapeDataString(cql)}&expand=version&limit=100";
+
+            // The batching is client-side (≤100 ids per query), so one response
+            // normally covers a batch — but follow the cursor regardless. A short
+            // page would otherwise drop those pages' versions, and the watch loop
+            // would then never notice them change: the same silent-truncation
+            // family as the scope-resolution bug, on the same endpoint.
+            var found = await SearchByCursorAsync(
+                url,
+                batch.Count,
+                item => GetString(item, "id") is { } id
+                    ? (id, GetInt(GetObject(item, "version"), "number"))
+                    : default((string, int?)?),
+                warn,
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (var (id, version) in found)
             {
-                var batch = ordered.Skip(start).Take(100);
-                var cql = "id in (" + string.Join(",", batch) + ")";
-                var url = $"rest/api/content/search?cql={Uri.EscapeDataString(cql)}&expand=version&limit=100";
-
-                using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                {
-                    continue;
-                }
-
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-                foreach (var item in GetArray(doc.RootElement, "results"))
-                {
-                    if (GetString(item, "id") is { } id)
-                    {
-                        versions[id] = GetInt(GetObject(item, "version"), "number");
-                    }
-                }
+                versions[id] = version;
             }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-        {
-            // Partial result — the caller compares only what it received.
         }
 
         return versions;

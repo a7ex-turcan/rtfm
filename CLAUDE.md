@@ -611,6 +611,22 @@ tracker of tickets.
   description-only to shed comments), a page *is* its body — a truncated page is
   just a worse page — so every crawled page is indexed in full; the budget cap
   is the only size lever.
+- **Scope enumeration is cursor-paged; `start` is a trap.** Confluence Cloud's
+  `/rest/api/content/search` **silently ignores** the `start` parameter — every
+  request returns the same first page. Offset paging therefore capped every
+  scope at 100 pages *while looking like it had read them all*: the
+  `page.Count < limit` termination check never fired (each page came back
+  exactly `limit` long), so the loop instead ran to the budget ceiling,
+  re-reading the same 100 ids ~50 times, and the crawler's visited set quietly
+  deduped the repeats. A 407-page space indexed 100 pages and reported success;
+  re-indexing could not recover the rest. The only paging that works is
+  following `_links.next` (an opaque cursor), resolved against `_links.base`.
+  `SearchPagesAsync` and `FetchVersionsAsync` share one `SearchByCursorAsync`
+  walker, scope CQL carries `ORDER BY created asc` so a budget-truncated scope
+  is at least deterministic, and an enumeration that ends early now **warns**
+  instead of passing as complete (§5) — `ConfluenceCrawlResult.Warnings`, the
+  `JiraCrawlResult.Warnings` pattern. Pinned by `ConfluencePaginationTests`,
+  whose stub reproduces the server's ignore-`start` behaviour.
 - **Change detection uses `version.number`, not a timestamp.** Confluence bumps
   a monotonic integer `version.number` on every edit, a cleaner signal than the
   `updated` clock Jira had to use; the monitor stores it and re-indexes when the
@@ -2045,6 +2061,25 @@ comment-only change isn't detected until the page body next changes or a fresh
 follow-up; (2) only **top-level** comments are pulled, not replies-to-comments
 (another `/child/comment` level down) — deferred as most value is top-level.
 267 tests (2 new).
+
+*Post-phase fix — scope enumeration stopped at 100 pages.* Any space/subtree
+seed larger than one API page indexed only its **first 100** pages, silently:
+`SearchPagesAsync` paged with `start`, which Confluence Cloud's
+`/rest/api/content/search` ignores (§2.17). Every request returned the same
+first page, so the `page.Count < limit` exit never fired, the loop ran to the
+5000 ceiling re-reading the same ids ~50 times, and the crawler's visited set
+absorbed the duplicates — leaving a run that reported success with 4/5 of the
+space missing. Measured on the real `PH` space (407 pages): start-paging → 100
+unique ids and 50 redundant round-trips, cursor-paging → **407 in 5 requests**.
+Fixed by following `_links.next`; `SearchPagesAsync` and `FetchVersionsAsync`
+now share `SearchByCursorAsync` (the latter's client-side ≤100-id batching hid
+the same latent truncation, which would have made `watch` blind to those
+pages' edits). Scope CQL gained `ORDER BY created asc`, and a truncated
+enumeration warns rather than passing as complete.
+**Backfill required:** corpora indexed from a >100-page scope *before* this fix
+are incomplete, and re-indexing before it could not help — re-index them once
+on the fixed build. 294 tests (5 new; the stub reproduces the server's
+ignore-`start` behaviour so a return to offset paging fails in CI).
 
 **Deliberately not planned:** web UI (the LLM client is the UX, §2.11), cloud
 sync/hosting (per-dev local is the model, §intro). (Confluence API pull was
