@@ -8,8 +8,18 @@ namespace Rtfm.Core.Jira;
 /// <param name="FollowMentions">Follow <c>KEY-123</c> text mentions — <b>seed only</b>, validated against real project keys.</param>
 public sealed record JiraCrawlOptions(int MaxDepth, int MaxTickets, bool FollowMentions);
 
-/// <summary>One crawled ticket: its BFS depth, the pulled issue, and its rendered document.</summary>
-public sealed record JiraCrawlNode(string Key, int Depth, JiraIssue Issue, RenderedJiraDocument Rendered);
+/// <summary>
+/// One crawled ticket: its BFS depth, the pulled issue, its rendered document,
+/// and the Development panel that was folded into it (retained so a caller can
+/// report on it without re-fetching; <see cref="JiraDevelopment.None"/> when the
+/// ticket has none or it wasn't readable).
+/// </summary>
+public sealed record JiraCrawlNode(
+    string Key,
+    int Depth,
+    JiraIssue Issue,
+    RenderedJiraDocument Rendered,
+    JiraDevelopment Development);
 
 /// <summary>The outcome of a crawl: what to index, and what the leash cut.</summary>
 /// <param name="Nodes">Tickets pulled, in BFS order — the index plan.</param>
@@ -115,7 +125,7 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
 
             var rendered = renderer.Render(issue, baseUrl, pulledAt, development);
             var canonical = issue.Key.ToUpperInvariant();
-            nodes.Add(new JiraCrawlNode(canonical, depth, issue, rendered));
+            nodes.Add(new JiraCrawlNode(canonical, depth, issue, rendered, development));
             log?.Invoke($"pulled {canonical} (depth {depth}"
                 + (development.IsEmpty ? ")" : $", {development.PullRequests.Count} PR(s), {development.Commits.Count} commit(s))"));
 

@@ -147,7 +147,7 @@ public class ConfluenceTests
     public void Render_appends_inline_and_footer_comment_sections()
     {
         var page = new ConfluencePage(
-            Id: "1", Title: "ADR", Type: "page", SpaceKey: "PR", Ancestors: [],
+            Id: "1", Title: "ADR", Type: "page", SpaceKey: "PR", Ancestors: [], AncestorIds: [],
             VersionNumber: 2, VersionWhen: new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero), VersionBy: "Alice",
             BodyHtml: "<p>The decision body.</p>", ChildPageIds: [], LinkedPageIds: []);
 
@@ -180,6 +180,7 @@ public class ConfluenceTests
             Type: "page",
             SpaceKey: "AISDLC",
             Ancestors: ["Home", "Programmes"],
+            AncestorIds: ["1", "2"],
             VersionNumber: 3,
             VersionWhen: when,
             VersionBy: "Michael Dimitriadis",

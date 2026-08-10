@@ -14,6 +14,45 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.12.0] - 2026-08-10
+
+### Added
+- **`rtfm jira index` and `rtfm confluence index` draw what they indexed as a
+  tree** when they finish, using each source's own hierarchy — Jira's
+  epic → story → subtask chain, Confluence's page ancestors — rather than crawl
+  order, so the shape matches how the content is actually organised:
+
+  ```
+  18 ticket(s) indexed into myproject
+  ├── CEM-231  Policy Management  3 chunks
+  └── UNICORN-40  [ABAC] Policy Management  3 chunks
+      ├── AEXP-144  [ABAC] Group Management  2 chunks   ← seed
+      │   ├── AEXP-18  Group Creation & Lifecycle  7 chunks · 1 PR · 5 commits
+      │   └── AEXP-21  Fetch eligible users  12 chunks · 5 PRs · 10 commits
+      └── AEXP-149  [ABAC] Policy Assignment  3 chunks
+  ```
+
+  Mostly it's just nice to look at, but the shape earns its keep: a subtree that
+  arrived only because a link pointed at it is immediately visible, which is how
+  an unrelated project turning up at depth 2 stops being a surprise.
+
+  The **seed is marked, not forced to the root** — traversal walks up as well as
+  down, so a seed ticket's own parent epic is usually crawled too and genuinely
+  sits above it. Roots reached by following links are grouped separately, but
+  only when there are in-scope roots to contrast them with. Children sort
+  naturally (`AEXP-19` before `AEXP-100`), the node count is capped at 80 with
+  the remainder reported, and a parent cycle can't strand a node.
+
+  Presentation only, on stderr, and drawn just on a live terminal — redirected
+  output is byte-for-byte what it was before.
+
+### Changed
+- `JiraCrawlNode` now carries the ticket's `Development` panel, and
+  `ConfluencePage` carries `AncestorIds` alongside the ancestor titles. Both
+  were needed by the tree: the Development panel was fetched then discarded, and
+  ancestor titles are unique only *within* a space, so a multi-space run would
+  mis-join pages on them.
+
 ## [1.11.1] - 2026-08-07
 
 ### Fixed

@@ -262,6 +262,7 @@ internal static class ConfluenceCommand
             await ingestor.EnsureIndexAsync().ConfigureAwait(false);
 
             var totalChunks = 0;
+            var chunksById = new Dictionary<string, int>(StringComparer.Ordinal);
             await Ui.Err.Progress()
                 .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(), new SpinnerColumn(Spinner.Known.Dots))
                 .StartAsync(async pctx =>
@@ -272,9 +273,11 @@ internal static class ConfluenceCommand
                     {
                         task.Description = $"[bold]Indexing[/] [dim]{Ui.E(node.Page.Title)}[/]";
                         title.Progress(++done, result.Nodes.Count, $"indexing {node.Page.Title}");
-                        totalChunks += await ingestor.IngestDocumentAsync(
+                        var chunks = await ingestor.IngestDocumentAsync(
                             ConfluenceSource.Key(node.PageId), node.Rendered.Markdown, node.Rendered.Title, node.Rendered.ModifiedAt, project, indexedAt)
                             .ConfigureAwait(false);
+                        chunksById[node.PageId] = chunks;
+                        totalChunks += chunks;
                         task.Increment(1);
                     }
                 }).ConfigureAwait(false);
@@ -296,6 +299,12 @@ internal static class ConfluenceCommand
             Ui.Err.MarkupLine($"[green]✓[/] Indexed [bold]{result.Nodes.Count}[/] page(s) → [bold]{totalChunks}[/] chunks "
                 + $"[dim](project {Ui.E(project)}; {scopeIndexed} in-scope + {result.Nodes.Count - scopeIndexed} linked)[/]"
                 + (embedder is null ? " · [yellow]lexical-only[/]" : " · [dim]embedded[/]"));
+
+            // Only a lone page seed names a specific page; a space or folder seed
+            // (or several seeds) has no single "this one" to mark.
+            RenderPageTree(result, chunksById, project,
+                seeds is [{ Kind: ConfluenceSeedKind.Page } only] ? only.Value : null);
+
             Ui.Err.MarkupLine($"[dim]Monitoring {monitor.Count} page(s) in this project — run [italic]rtfm confluence watch --project {Ui.E(project)}[/] to keep them fresh.[/]");
             ReportLeash(result);
             return 0;
@@ -315,6 +324,37 @@ internal static class ConfluenceCommand
             Ui.Err.MarkupLine($"[red]Could not reach OpenSearch:[/] {Ui.E(ex.Message)}. Is the stack up? Try [italic]rtfm ping[/].");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// The crawled pages as Confluence's own page tree. The parent is the
+    /// nearest ancestor that was itself indexed — ancestors above the crawled
+    /// scope simply aren't part of this run, so their descendants surface as
+    /// roots. Keyed on ancestor <em>ids</em>: titles are only unique within a
+    /// space, so a multi-space run would mis-join on them.
+    /// </summary>
+    private static void RenderPageTree(ConfluenceCrawlResult result, IReadOnlyDictionary<string, int> chunksById, string project, string? seedPageId)
+    {
+        var indexed = result.Nodes.Select(n => n.PageId).ToHashSet(StringComparer.Ordinal);
+
+        var items = result.Nodes.Select(node =>
+        {
+            // Ancestors run root-first, so the last one present in this run is
+            // the nearest indexed ancestor — the right parent for the tree.
+            var parent = node.Page.AncestorIds.LastOrDefault(indexed.Contains);
+            var detail = chunksById.TryGetValue(node.PageId, out var chunks)
+                ? $"{chunks} chunk{(chunks == 1 ? "" : "s")}"
+                : null;
+
+            return new IndexTreeItem(
+                Id: node.PageId,
+                ParentId: parent,
+                Depth: node.Depth,
+                Label: node.Page.Title,
+                Detail: detail);
+        }).ToList();
+
+        IndexTree.Render(items, $"{result.Nodes.Count} page(s) indexed into {project}", seedPageId);
     }
 
     /// <summary>Human label for the seed set: "space PH" for one, "3 seeds (space PR, space PH, …)" for several.</summary>

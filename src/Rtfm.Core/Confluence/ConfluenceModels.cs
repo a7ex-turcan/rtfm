@@ -15,6 +15,10 @@ public sealed record ConfluencePage(
     string Type,
     string? SpaceKey,
     IReadOnlyList<string> Ancestors,
+    // Ancestor *ids*, same order as Ancestors (root first). Titles alone can't
+    // join a page to its parent reliably — they're only unique within a space —
+    // so the id is what a hierarchy view keys on.
+    IReadOnlyList<string> AncestorIds,
     int VersionNumber,
     DateTimeOffset? VersionWhen,
     string? VersionBy,

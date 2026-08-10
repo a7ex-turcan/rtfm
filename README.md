@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.11.1-FF8C00" alt="version 1.11.1">
+  <img src="https://img.shields.io/badge/version-1.12.0-FF8C00" alt="version 1.12.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -519,6 +519,21 @@ Multiple seeds crawl as **one run**, not several: they share a visited-set, so a
 page reachable from two of them is fetched once, and `--max-pages` stays a
 ceiling on the whole run rather than becoming a per-space allowance. The preview
 shows each seed's own count plus the union.
+
+When the run finishes, RTFM draws what it indexed as a tree — Confluence's own
+page hierarchy, or Jira's epic → story → subtask chain — so you can see the
+shape of what you pulled and spot anything that arrived only because a link
+pointed at it:
+
+```
+14 page(s) indexed into myproject
+├── PPEG Homepage  20 chunks   ← seed
+│   ├── P1 Retrospective Template  2 chunks
+│   └── Product Development - Technical  1 chunk
+│       └── Technical Scrum of Scrums Home Page  1 chunk
+│           ├── TSOS - Wednesday September 9, 2020  2 chunks
+│           └── TSOS - Wednesday September 23, 2020  6 chunks
+```
 
 The scope (subtree / folder / space) is resolved in one query, then in-body
 links to other pages are followed breadth-first up to `--depth`, bounded by

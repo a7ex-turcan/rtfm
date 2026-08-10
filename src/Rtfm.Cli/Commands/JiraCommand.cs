@@ -214,6 +214,7 @@ internal static class JiraCommand
             await ingestor.EnsureIndexAsync().ConfigureAwait(false);
 
             var totalChunks = 0;
+            var chunksByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             await Ui.Err.Progress()
                 .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(), new SpinnerColumn(Spinner.Known.Dots))
                 .StartAsync(async pctx =>
@@ -224,9 +225,11 @@ internal static class JiraCommand
                     {
                         task.Description = $"[bold]Indexing[/] [dim]{Ui.E(node.Key)}[/]";
                         title.Progress(++done, result.Nodes.Count, $"indexing {node.Key}");
-                        totalChunks += await ingestor.IngestDocumentAsync(
+                        var chunks = await ingestor.IngestDocumentAsync(
                             JiraSource.Key(node.Key), node.Rendered.Markdown, node.Rendered.Title, node.Rendered.ModifiedAt, project, indexedAt)
                             .ConfigureAwait(false);
+                        chunksByKey[node.Key] = chunks;
+                        totalChunks += chunks;
                         task.Increment(1);
                     }
                 }).ConfigureAwait(false);
@@ -247,6 +250,8 @@ internal static class JiraCommand
             Ui.Err.MarkupLine($"[green]✓[/] Indexed [bold]{result.Nodes.Count}[/] ticket(s) → [bold]{totalChunks}[/] chunks "
                 + $"[dim](project {Ui.E(project)})[/]"
                 + (embedder is null ? " · [yellow]lexical-only[/]" : " · [dim]embedded[/]"));
+
+            RenderTicketTree(result, chunksByKey, project, seed);
             Ui.Err.MarkupLine($"[dim]Monitoring {monitor.Count} ticket(s) in this project — run [italic]rtfm jira watch --project {Ui.E(project)}[/] to keep them fresh.[/]");
             ReportLeash(result);
             return 0;
@@ -287,6 +292,44 @@ internal static class JiraCommand
 
         Ui.Err.Write(table);
         ReportLeash(result);
+    }
+
+    /// <summary>
+    /// The crawled tickets as the epic → story → subtask tree Jira itself
+    /// defines, so the run's shape is visible at a glance. A ticket whose parent
+    /// wasn't part of this crawl is a root; one that only arrived via an issue
+    /// link is grouped separately, which is how an unrelated project turning up
+    /// at depth 2 becomes obvious.
+    /// </summary>
+    private static void RenderTicketTree(JiraCrawlResult result, IReadOnlyDictionary<string, int> chunksByKey, string project, string seed)
+    {
+        var items = result.Nodes.Select(node =>
+        {
+            var detail = new List<string>();
+            if (chunksByKey.TryGetValue(node.Key, out var chunks))
+            {
+                detail.Add($"{chunks} chunk{(chunks == 1 ? "" : "s")}");
+            }
+
+            if (node.Development.PullRequests.Count > 0)
+            {
+                detail.Add($"{node.Development.PullRequests.Count} PR{(node.Development.PullRequests.Count == 1 ? "" : "s")}");
+            }
+
+            if (node.Development.Commits.Count > 0)
+            {
+                detail.Add($"{node.Development.Commits.Count} commit{(node.Development.Commits.Count == 1 ? "" : "s")}");
+            }
+
+            return new IndexTreeItem(
+                Id: node.Key,
+                ParentId: node.Issue.ParentKey,
+                Depth: node.Depth,
+                Label: $"{node.Key}  {node.Issue.Summary}",
+                Detail: detail.Count > 0 ? string.Join(" · ", detail) : null);
+        }).ToList();
+
+        IndexTree.Render(items, $"{result.Nodes.Count} ticket(s) indexed into {project}", seed);
     }
 
     private static void ReportLeash(JiraCrawlResult result)
