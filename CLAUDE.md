@@ -2099,6 +2099,25 @@ are incomplete, and re-indexing before it could not help — re-index them once
 on the fixed build. 294 tests (5 new; the stub reproduces the server's
 ignore-`start` behaviour so a return to offset paging fails in CI).
 
+*Post-phase enhancement (both connectors) — the indexed tree.* After a `jira
+index` or `confluence index` run, the CLI draws what it just indexed as a tree
+(`IndexTree` in `Rtfm.Cli`). It uses each source's **own** hierarchy — Jira's
+`parent` chain (epic → story → subtask), Confluence's `ancestors` — not crawl
+order, so the shape matches how the content is actually organised. Two data
+points had to be retained for it: `JiraCrawlNode.Development` (the panel was
+fetched then discarded, so PR/commit counts weren't available to report) and
+`ConfluencePage.AncestorIds` (only ancestor *titles* were parsed, and titles are
+unique per space — a multi-space run would mis-join on them).
+Notes worth keeping: the **seed is usually not the root**, because traversal
+walks up as well as down and a seed ticket's parent epic normally gets crawled
+too — it's marked `← seed` instead of forced to the top. A "reached by following
+links" group only appears when there are *also* in-scope roots to contrast with,
+otherwise it would sit above the entire tree and read as if nothing was in
+scope. Node count is capped (80) with the remainder reported (§5), children sort
+naturally so `AEXP-19` precedes `AEXP-100`, and a parent cycle can't strand a
+node (unvisited items are shown under `unplaced`). Presentation only, on stderr,
+gated on `Ui.Fancy` — redirected output is unchanged.
+
 **Deliberately not planned:** web UI (the LLM client is the UX, §2.11), cloud
 sync/hosting (per-dev local is the model, §intro). (Confluence API pull was
 deferred through Phase 25; **Phase 26 delivers it** — §2.17, the same reversal

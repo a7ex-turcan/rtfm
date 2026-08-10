@@ -120,12 +120,28 @@ public sealed partial class ConfluenceClient : IDisposable
             Type: GetString(root, "type") ?? "page",
             SpaceKey: GetString(GetObject(root, "space"), "key"),
             Ancestors: ParseAncestorTitles(root),
+            AncestorIds: ParseAncestorIds(root),
             VersionNumber: GetInt(version, "number") ?? 0,
             VersionWhen: ConfluenceDate.Parse(GetString(version, "when")),
             VersionBy: GetString(GetObject(version, "by"), "displayName"),
             BodyHtml: bodyHtml,
             ChildPageIds: ParseChildIds(root),
             LinkedPageIds: ParseLinkedIds(bodyHtml, id));
+    }
+
+    /// <summary>Ancestor ids, root first — the join key for a page hierarchy view.</summary>
+    private static IReadOnlyList<string> ParseAncestorIds(JsonElement root)
+    {
+        var ids = new List<string>();
+        foreach (var ancestor in GetArray(root, "ancestors"))
+        {
+            if (GetString(ancestor, "id") is { } id)
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
     }
 
     private static IReadOnlyList<string> ParseAncestorTitles(JsonElement root)
