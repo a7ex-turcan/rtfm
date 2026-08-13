@@ -14,6 +14,35 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.12.1] - 2026-08-13
+
+### Fixed
+- **The MCP server connected but served no tools.** Clients reported:
+
+  > Reconnected to rtfm, but fetching tools failed: Invalid result for
+  > tools/list: missing required resultType
+
+  The handshake succeeded, so `/mcp` looked healthy — but every tool was
+  unavailable, which made the server effectively dead to the client.
+
+  The cause was the pinned `ModelContextProtocol` **2.0.0-preview.1**, which
+  **echoed back whatever `protocolVersion` the client requested** instead of
+  negotiating down to one it actually supports. A client offering `2026-07-28`
+  was therefore told the server spoke that revision. It didn't: its
+  `tools/list` response omitted the `resultType` field that revision makes
+  mandatory, so a spec-correct client rejected the response. The
+  absent-means-complete compatibility bridge couldn't rescue it, because that
+  only covers servers declaring an *earlier* revision — and this one had
+  (accidentally) declared the strict one.
+
+  Fixed by moving to the stable **2.1.0** SDK, which negotiates honestly: no
+  released SDK implements `2026-07-28`, and 2.1.0 correctly reports its ceiling
+  as `2025-11-25`, where the bridge applies. No source changes were needed.
+
+  Verified over raw stdio: handshake negotiates `2025-11-25`, `tools/list`
+  returns all 15 tools, `ping` and `list_projects` execute and return real
+  data, and stdout stays pure JSON-RPC.
+
 ## [1.12.0] - 2026-08-10
 
 ### Added

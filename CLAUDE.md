@@ -701,8 +701,17 @@ tracker of tickets.
 > option, not a need. `DocumentSearch` additionally falls back to lexical
 > per-query if hybrid ever 500s again). `MimeKit` **4.17.0**, `AngleSharp` **1.5.1**,
 > `ReverseMarkdown` **5.4.0** (Phase 1a), `Mammoth` **1.11.0** (Phase 1b),
-> `ModelContextProtocol` **2.0.0-preview.1** + `Microsoft.Extensions.Hosting`
-> **10.0.9** (Phase 4). `Microsoft.ML.OnnxRuntime` **1.27.0** +
+> `ModelContextProtocol` **2.1.0** + `Microsoft.Extensions.Hosting`
+> **10.0.9** (Phase 4; the SDK was **2.0.0-preview.1** until 1.12.1 — that
+> preview **echoed back whatever `protocolVersion` the client asked for**
+> instead of negotiating down to one it supports, so a client offering
+> `2026-07-28` was told the server spoke it. It didn't: its `tools/list` omitted
+> the `resultType` that revision makes mandatory, and a spec-correct client
+> rejected the response, leaving the server connected with **zero** tools. No
+> released SDK implements `2026-07-28`; 2.1.0 tops out at `2025-11-25`, where
+> the absent-means-complete bridge applies. **Don't run the MCP SDK on a
+> preview** — the handshake is the one place a bug makes every tool vanish at
+> once). `Microsoft.ML.OnnxRuntime` **1.27.0** +
 > `Microsoft.ML.Tokenizers` **2.0.0** (Phase 6). `Spectre.Console` **0.57.1**
 > (Phase 7). `PdfPig` **0.1.15** (NuGet ID `PdfPig`, *not* the stale
 > `UglyToad.PdfPig`) + `ClosedXML` **0.105.0** (Phase 9). `RapidOcrNet`
