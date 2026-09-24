@@ -83,6 +83,34 @@ public class JiraCrawlerTests
         Assert.False(result.BudgetHit);
     }
 
+    [Fact]
+    public async Task Multiple_seeds_share_one_visited_set_and_all_start_at_depth_zero()
+    {
+        var crawler = NewCrawler(out var client);
+        using var _ = client;
+
+        // C and B overlap A's neighbourhood; a duplicate + lower-case key must not double-fetch.
+        var result = await crawler.CrawlAsync(["A", "c", "C", "D"], "https://x.atlassian.net", When, new JiraCrawlOptions(MaxDepth: 1, MaxTickets: 50, FollowMentions: false));
+
+        Assert.Equal(new[] { "A", "B", "C", "D" }, result.Nodes.Select(n => n.Key).OrderBy(k => k));
+        Assert.Equal(0, result.Nodes.Single(n => n.Key == "C").Depth);
+        Assert.Equal(0, result.Nodes.Single(n => n.Key == "D").Depth);
+        Assert.Equal(1, result.Nodes.Single(n => n.Key == "B").Depth);
+        Assert.Equal(new[] { "E" }, result.Skipped);
+    }
+
+    [Fact]
+    public async Task Seeds_are_pulled_before_any_neighbour_under_a_tight_budget()
+    {
+        var crawler = NewCrawler(out var client);
+        using var _ = client;
+
+        var result = await crawler.CrawlAsync(["A", "D"], "https://x.atlassian.net", When, new JiraCrawlOptions(MaxDepth: 3, MaxTickets: 2, FollowMentions: false));
+
+        Assert.Equal(new[] { "A", "D" }, result.Nodes.Select(n => n.Key));
+        Assert.True(result.BudgetHit);
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private static readonly Dictionary<string, string[]> Children = new()

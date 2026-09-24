@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.12.1-FF8C00" alt="version 1.12.1">
+  <img src="https://img.shields.io/badge/version-1.13.0-FF8C00" alt="version 1.13.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -402,6 +402,9 @@ you'd rather name a different environment variable than `JIRA_TOKEN`.
 ```bash
 # One ticket:
 rtfm jira index PROJ-123 --project myproject
+
+# Several at once — one crawl, one shared --max-tickets budget:
+rtfm jira index PROJ-123 PROJ-456 PROJ-789 --project myproject
 
 # An epic pulls its stories too — follow links breadth-first, but preview first:
 rtfm jira index PROJ-100 --project myproject --dry-run       # show the crawl plan

@@ -9,8 +9,9 @@ namespace Rtfm.Cli.Commands;
 /// <summary>
 /// <c>rtfm jira</c> — the Phase 25 Jira integration (§2.16). <c>config</c> stores
 /// a per-project workspace descriptor (URL + email + a <c>${ENV}</c> token
-/// reference) and verifies auth read-only; <c>index &lt;KEY&gt;</c> pulls a
-/// ticket and ingests it as thread-granular chunks under <c>jira://KEY</c>;
+/// reference) and verifies auth read-only; <c>index &lt;KEY&gt;…</c> pulls one
+/// or more tickets (one shared crawl) and ingests each as thread-granular
+/// chunks under <c>jira://KEY</c>;
 /// <c>list</c> shows configured workspaces. Reads only — <see cref="JiraClient"/>
 /// has no write path.
 /// </summary>
@@ -39,12 +40,15 @@ internal static class JiraCommand
             usage: rtfm jira config --url <workspace> --email <you> [--token-env JIRA_TOKEN]
                                     [--project <name>] [--max-depth <n>] [--max-tickets <n>]
                                     [--follow-mentions] [--poll <seconds>]
-                   rtfm jira index <ISSUE-KEY> [--project <name>] [--depth <n>]
+                   rtfm jira index <ISSUE-KEY>... [--project <name>] [--depth <n>]
                                     [--max-tickets <n>] [--follow-mentions] [--dry-run]
                    rtfm jira watch [--project <name>] [--interval <seconds>] [--once]
                    rtfm jira purge <ISSUE-KEY> [--project <name>]
                    rtfm jira purge --all [--project <name>] [--yes]
                    rtfm jira list
+
+            index takes several keys (space- or comma-separated) crawled as one run:
+            one shared --max-tickets budget, each ticket pulled once.
 
             The API token is read from the environment variable named by --token-env
             (default JIRA_TOKEN); only the reference is stored, never the token.
@@ -131,7 +135,8 @@ internal static class JiraCommand
 
     private static async Task<int> IndexAsync(string[] args)
     {
-        string? key = null, project = null;
+        string? project = null;
+        var keys = new List<string>();
         int? depth = null, maxTickets = null;
         bool followMentions = false, dryRun = false;
 
@@ -145,14 +150,16 @@ internal static class JiraCommand
                 case "--follow-mentions": followMentions = true; break;
                 case "--dry-run": dryRun = true; break;
                 default:
-                    if (key is null) { key = args[i]; }
-                    else { return Usage(); }
+                    if (args[i].StartsWith('-')) { return Usage(); }
 
+                    // `T-1 T-2` and `T-1,T-2` both work.
+                    keys.AddRange(args[i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
                     break;
             }
         }
 
-        if (string.IsNullOrWhiteSpace(key))
+        var seeds = keys.Select(k => k.ToUpperInvariant()).Distinct(StringComparer.Ordinal).ToList();
+        if (seeds.Count == 0)
         {
             return Usage();
         }
@@ -165,9 +172,18 @@ internal static class JiraCommand
             return 1;
         }
 
+        // The tickets the user named are never what the budget cuts: it is
+        // raised to cover them, and still bounds how far links are followed.
+        var budget = Math.Clamp(maxTickets ?? config.MaxTickets, 1, JiraConfig.MaxTicketsCeiling);
+        if (seeds.Count > budget)
+        {
+            budget = Math.Min(seeds.Count, JiraConfig.MaxTicketsCeiling);
+            Ui.Err.MarkupLine($"[dim]{seeds.Count} keys given — budget raised to {budget} to cover them.[/]");
+        }
+
         var options = new JiraCrawlOptions(
             MaxDepth: depth ?? config.MaxDepth,
-            MaxTickets: Math.Clamp(maxTickets ?? config.MaxTickets, 1, JiraConfig.MaxTicketsCeiling),
+            MaxTickets: budget,
             FollowMentions: followMentions || config.FollowMentions);
 
         try
@@ -175,17 +191,19 @@ internal static class JiraCommand
             using var client = new JiraClient(config);
             var crawler = new JiraCrawler(client, new JiraDocumentRenderer());
             var indexedAt = DateTimeOffset.UtcNow;
-            var seed = key.Trim().ToUpperInvariant();
+            var label = seeds.Count == 1
+                ? seeds[0]
+                : $"{seeds.Count} tickets ({string.Join(", ", seeds.Take(3))}{(seeds.Count > 3 ? ", …" : "")})";
 
             // Terminal-tab progress, so a long crawl stays legible when the
             // window is buried. Disposed → prior title restored.
             using var title = new TerminalTitle();
-            title.Reconciling($"crawling {seed}");
+            title.Reconciling($"crawling {label}");
 
             var result = await Ui.Err.Status()
                 .Spinner(Spinner.Known.Dots)
-                .StartAsync($"Crawling from {Ui.E(seed)} (depth ≤ {options.MaxDepth})…", async ctx =>
-                    await crawler.CrawlAsync(seed, config.BaseUrl, indexedAt, options,
+                .StartAsync($"Crawling from {Ui.E(label)} (depth ≤ {options.MaxDepth})…", async ctx =>
+                    await crawler.CrawlAsync(seeds, config.BaseUrl, indexedAt, options,
                         log: msg =>
                         {
                             ctx.Status($"[dim]{Ui.E(msg)}[/]");
@@ -196,13 +214,13 @@ internal static class JiraCommand
 
             if (result.Nodes.Count == 0)
             {
-                Ui.Err.MarkupLine($"[red]Nothing pulled[/] for [bold]{Ui.E(seed)}[/]" + (result.Skipped.Count > 0 ? $" [dim]({result.Skipped.Count} skipped)[/]" : "") + ".");
+                Ui.Err.MarkupLine($"[red]Nothing pulled[/] for [bold]{Ui.E(label)}[/]" + (result.Skipped.Count > 0 ? $" [dim]({result.Skipped.Count} skipped)[/]" : "") + ".");
                 return 1;
             }
 
             if (dryRun)
             {
-                RenderCrawlPlan(result, seed, options);
+                RenderCrawlPlan(result, label, options);
                 Ui.Err.MarkupLine("[yellow]Dry run — nothing indexed.[/] Drop [italic]--dry-run[/] to index this set.");
                 return 0;
             }
@@ -251,7 +269,7 @@ internal static class JiraCommand
                 + $"[dim](project {Ui.E(project)})[/]"
                 + (embedder is null ? " · [yellow]lexical-only[/]" : " · [dim]embedded[/]"));
 
-            RenderTicketTree(result, chunksByKey, project, seed);
+            RenderTicketTree(result, chunksByKey, project, seeds);
             Ui.Err.MarkupLine($"[dim]Monitoring {monitor.Count} ticket(s) in this project — run [italic]rtfm jira watch --project {Ui.E(project)}[/] to keep them fresh.[/]");
             ReportLeash(result);
             return 0;
@@ -274,12 +292,12 @@ internal static class JiraCommand
         }
     }
 
-    private static void RenderCrawlPlan(JiraCrawlResult result, string seed, JiraCrawlOptions options)
+    private static void RenderCrawlPlan(JiraCrawlResult result, string seedLabel, JiraCrawlOptions options)
     {
         var table = new Table()
             .Border(TableBorder.Rounded)
             .BorderColor(Color.Grey)
-            .Title($"[bold]Crawl plan[/] [dim]from {Ui.E(seed)}, depth ≤ {options.MaxDepth}, budget {options.MaxTickets}[/]")
+            .Title($"[bold]Crawl plan[/] [dim]from {Ui.E(seedLabel)}, depth ≤ {options.MaxDepth}, budget {options.MaxTickets}[/]")
             .AddColumn(new TableColumn("[bold]Depth[/]").RightAligned())
             .AddColumn("[bold]Key[/]")
             .AddColumn("[bold]Title[/]");
@@ -301,7 +319,7 @@ internal static class JiraCommand
     /// link is grouped separately, which is how an unrelated project turning up
     /// at depth 2 becomes obvious.
     /// </summary>
-    private static void RenderTicketTree(JiraCrawlResult result, IReadOnlyDictionary<string, int> chunksByKey, string project, string seed)
+    private static void RenderTicketTree(JiraCrawlResult result, IReadOnlyDictionary<string, int> chunksByKey, string project, IReadOnlyList<string> seeds)
     {
         var items = result.Nodes.Select(node =>
         {
@@ -329,7 +347,7 @@ internal static class JiraCommand
                 Detail: detail.Count > 0 ? string.Join(" · ", detail) : null);
         }).ToList();
 
-        IndexTree.Render(items, $"{result.Nodes.Count} ticket(s) indexed into {project}", seed);
+        IndexTree.Render(items, $"{result.Nodes.Count} ticket(s) indexed into {project}", seeds);
     }
 
     private static void ReportLeash(JiraCrawlResult result)

@@ -354,7 +354,7 @@ internal static class ConfluenceCommand
                 Detail: detail);
         }).ToList();
 
-        IndexTree.Render(items, $"{result.Nodes.Count} page(s) indexed into {project}", seedPageId);
+        IndexTree.Render(items, $"{result.Nodes.Count} page(s) indexed into {project}", seedPageId is null ? null : [seedPageId]);
     }
 
     /// <summary>Human label for the seed set: "space PH" for one, "3 seeds (space PR, space PH, …)" for several.</summary>
