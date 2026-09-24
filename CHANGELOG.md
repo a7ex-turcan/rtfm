@@ -14,6 +14,25 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.13.0] - 2026-09-24
+
+### Added
+- **`rtfm jira index` takes several ticket keys at once** — space- or
+  comma-separated:
+
+  ```bash
+  rtfm jira index T-1 T-2 T-3 --project myproject
+  ```
+
+  The keys crawl as **one run**, the same model `confluence index` uses for
+  multiple seeds: one visited-set (a ticket linked from two keys is fetched and
+  indexed once) and one `--max-tickets` budget for the whole run rather than
+  per key. Every named key is a depth-0 seed — full fidelity with comments,
+  mentions followed when `--follow-mentions` is on, monitored as full by
+  `jira watch`. Seeds are pulled before any neighbour, so a tight budget only
+  cuts links, never the tickets you named; passing more keys than the budget
+  raises it to cover them, and says so.
+
 ## [1.12.1] - 2026-08-13
 
 ### Fixed

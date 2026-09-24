@@ -55,8 +55,26 @@ public sealed record JiraCrawlResult(
 /// </summary>
 public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer renderer)
 {
-    public async Task<JiraCrawlResult> CrawlAsync(
+    /// <summary>Convenience overload for the single-seed case.</summary>
+    public Task<JiraCrawlResult> CrawlAsync(
         string seedKey,
+        string baseUrl,
+        DateTimeOffset pulledAt,
+        JiraCrawlOptions options,
+        Action<string>? log = null,
+        CancellationToken cancellationToken = default)
+        => CrawlAsync([seedKey], baseUrl, pulledAt, options, log, cancellationToken);
+
+    /// <summary>
+    /// Crawls one or more seed tickets as a <b>single</b> run (the
+    /// <see cref="Rtfm.Core.Confluence.ConfluenceCrawler"/> multi-seed model, §2.17): every
+    /// seed starts at depth 0 with full fidelity, and all of them share one
+    /// visited-set and one budget — so a ticket reachable from two seeds is
+    /// fetched once, and <see cref="JiraCrawlOptions.MaxTickets"/> stays a
+    /// ceiling on the run rather than becoming "per seed".
+    /// </summary>
+    public async Task<JiraCrawlResult> CrawlAsync(
+        IReadOnlyList<string> seedKeys,
         string baseUrl,
         DateTimeOffset pulledAt,
         JiraCrawlOptions options,
@@ -65,11 +83,20 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
     {
         var maxDepth = Math.Max(0, options.MaxDepth);
         var budget = Math.Max(1, options.MaxTickets);
-        var seed = seedKey.Trim().ToUpperInvariant();
 
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { seed };
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<(string Key, int Depth)>();
-        queue.Enqueue((seed, 0));
+
+        // All seeds are enqueued before any neighbour, so BFS pulls every seed
+        // ahead of the first link hop — a tight budget cuts neighbours, not the
+        // tickets the user named.
+        foreach (var seed in seedKeys.Select(k => k.Trim().ToUpperInvariant()).Where(k => k.Length > 0))
+        {
+            if (visited.Add(seed))
+            {
+                queue.Enqueue((seed, 0));
+            }
+        }
 
         var nodes = new List<JiraCrawlNode>();
         var skipped = new List<string>();
@@ -88,8 +115,8 @@ public sealed partial class JiraCrawler(JiraClient client, JiraDocumentRenderer 
             log?.Invoke(message);
         }
 
-        // Project keys are only needed to validate mention edges (and only the
-        // seed contributes those), so fetch them once, up front, when opted in.
+        // Project keys are only needed to validate mention edges (and only
+        // seeds contribute those), so fetch them once, up front, when opted in.
         IReadOnlySet<string>? projectKeys = options.FollowMentions
             ? await client.FetchProjectKeysAsync(cancellationToken).ConfigureAwait(false)
             : null;

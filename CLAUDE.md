@@ -1925,6 +1925,13 @@ the first source RTFM pulls over an authenticated API, indexed, traversed,
 watched, and purged.** Version bump 1.5.1 → 1.6.0 (additive phase) pending at
 release.
 
+*Post-phase enhancement (1.13.0) — multiple seeds.* `jira index T-1 T-2 …`
+(or comma-separated) crawls every key as a depth-0 seed of **one** run —
+`JiraCrawler.CrawlAsync` takes a seed list, the Confluence §2.17 model: shared
+visited-set, one budget for the run. All seeds are enqueued before BFS starts,
+so a tight budget cuts neighbours rather than named tickets, and the CLI raises
+`--max-tickets` to the seed count when fewer. `IndexTree` marks every seed.
+
 *Post-phase enhancement — the Development panel (branches, PRs, commits).* The
 Jira analog of 1.8.0's Confluence comments: a ticket's linked development work
 was invisible, so "which PR implemented this?" was unanswerable. Now

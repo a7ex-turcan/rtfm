@@ -32,14 +32,15 @@ internal static class IndexTree
     /// </summary>
     internal const int MaxNodes = 80;
 
-    /// <param name="seedId">
-    /// The item the run was seeded from, marked so it's findable. It is often
+    /// <param name="seedIds">
+    /// The item(s) the run was seeded from, marked so they're findable. It is often
     /// <em>not</em> the tree's root: traversal walks up as well as down, so a
     /// seed ticket's own parent epic is usually crawled too and legitimately
     /// sits above it.
     /// </param>
-    public static void Render(IReadOnlyList<IndexTreeItem> items, string caption, string? seedId = null)
+    public static void Render(IReadOnlyList<IndexTreeItem> items, string caption, IReadOnlyCollection<string>? seedIds = null)
     {
+        var seeds = new HashSet<string>(seedIds ?? [], StringComparer.OrdinalIgnoreCase);
         if (!Ui.Fancy || items.Count == 0)
         {
             return;
@@ -72,7 +73,7 @@ internal static class IndexTree
 
         foreach (var root in scopeRoots)
         {
-            AddNode(tree, root, children, visited, ref drawn, seedId);
+            AddNode(tree, root, children, visited, ref drawn, seeds);
         }
 
         // The "linked" heading only earns its place when there is something to
@@ -85,7 +86,7 @@ internal static class IndexTree
 
         foreach (var item in linkedRoots)
         {
-            AddNode(linkedParent, item, children, visited, ref drawn, seedId);
+            AddNode(linkedParent, item, children, visited, ref drawn, seeds);
         }
 
         // Anything a parent cycle would have stranded: show it rather than lose it.
@@ -95,7 +96,7 @@ internal static class IndexTree
             var group = tree.AddNode("[dim]unplaced[/]");
             foreach (var item in stranded)
             {
-                AddNode(group, item, children, visited, ref drawn, seedId);
+                AddNode(group, item, children, visited, ref drawn, seeds);
             }
         }
 
@@ -113,7 +114,7 @@ internal static class IndexTree
         IReadOnlyDictionary<string, List<IndexTreeItem>> children,
         HashSet<string> visited,
         ref int drawn,
-        string? seedId)
+        IReadOnlySet<string> seeds)
     {
         if (drawn >= MaxNodes || !visited.Add(item.Id))
         {
@@ -121,7 +122,7 @@ internal static class IndexTree
         }
 
         drawn++;
-        var isSeed = seedId is not null && string.Equals(item.Id, seedId, StringComparison.OrdinalIgnoreCase);
+        var isSeed = seeds.Contains(item.Id);
         var text = isSeed
             ? $"[bold {Ui.Accent}]{Ui.E(item.Label)}[/]"
             : $"[{Ui.Accent}]{Ui.E(item.Label)}[/]";
@@ -141,7 +142,7 @@ internal static class IndexTree
         {
             foreach (var kid in kids)
             {
-                AddNode(node, kid, children, visited, ref drawn, seedId);
+                AddNode(node, kid, children, visited, ref drawn, seeds);
             }
         }
     }
