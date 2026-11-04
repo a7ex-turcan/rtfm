@@ -659,6 +659,117 @@ tracker of tickets.
   (`EnvironmentExpansion`, `DocumentIngestor.IngestDocumentAsync`); extract more
   only if a third Atlassian product ever appears.
 
+### 2.18 Live tracker pull (Azure DevOps Boards) — the Jira model, minus the vendor
+Phase 27 adds Azure DevOps work items the way §2.16 added Jira tickets: an
+authenticated, read-only pull into the derived index, by id, with link
+traversal and a polling watch. Everything §2.16 decided carries over (batch
+model, thread granularity, the three-cap leash, seeds-only comment fidelity, the
+monitored-set registry, synthetic key). Recorded here is only what differs.
+
+- **GET only — and that rules out WIQL, which turned out not to be needed.**
+  WIQL is a read-only query language, but Azure DevOps only accepts it over
+  `POST`. Keeping §2.16's "no write path by construction" means `AdoClient` has a
+  single private `GetAsync` that is the only place a request is built. Nothing
+  required WIQL anyway. An ADO item carries its **children among its own
+  relations** (Jira needed a `parent = KEY` search for an epic's stories), so
+  traversal is pure GETs. The watch probe is a batched `GET …/workitems?ids=…`
+  (200 per call, `errorPolicy=omit` so one deleted id can't fail its batch). A
+  `--query <WIQL>` bulk seed ("my open items", an area path) is the one thing
+  this costs. Adding it means a deliberate, documented POST exception, not a
+  drive-by.
+- **Auth borrows `az login`; nothing secret is stored.** The default
+  credential runs `az account get-access-token`. The token is held in memory,
+  refreshed 5 min before expiry and retried once on a 401 (tokens live about an
+  hour, so a long crawl can outlive one). A PAT is the fallback, as a `${ENV}`
+  reference (default `AZURE_DEVOPS_EXT_PAT`, the variable the `azure-devops` CLI
+  extension reads), sent as Basic `:PAT`. Three findings from the live org:
+  - **The documented resource id can fail.** Azure DevOps' app id
+    `499b84ac-1321-427f-aa17-267ca4b61b05` answered `AADSTS500011` ("resource
+    principal not found in the tenant") on the real tenant. The same app's legacy
+    URI, `https://app.vssps.visualstudio.com`, returned a token ADO accepts. With
+    no `--resource` configured, both are tried in that order and the winner is
+    kept for the process. Only `AADSTS500011` moves on to the next one; a sign-in
+    failure fails the same way for every resource, so it stops and says
+    `az login`.
+  - **On Windows `az` is `az.cmd`**, which `Process.Start` won't resolve
+    without a shell, so it runs under `cmd.exe /d /c`. Every argument (resource,
+    tenant) is validated to `[A-Za-z0-9._:/-]` first, so nothing reaches cmd
+    that it could interpret.
+  - **A bad PAT gets HTTP 203 plus an HTML sign-in page**, not a 401. That is a
+    "success" status that would otherwise reach the JSON parser, so it counts
+    as an auth failure (so does `text/html` on any 2xx).
+- **The source key includes the organization: `ado://{org}/{id}`.** A Jira key
+  carries its project prefix. A work item id is a bare integer, unique only
+  within one org. Re-index deletes by `source_path` alone (§2.9), so an org-less
+  key would let two RTFM projects pointed at two orgs silently replace each
+  other's `#123`. Org names are case-insensitive, so the key lower-cases the org.
+  Built by `AdoSource.Key`, which like `JiraSource.Key` never goes through
+  `PathNormalizer`. Config stores only the org: ids are org-wide, and each item's
+  own `System.TeamProject` drives the project-scoped calls (comments, web links).
+- **Change detection on `System.Rev`, and it sees more than Jira's watch.**
+  `Rev` is a monotonic counter (Confluence's `version.number` shape, §2.17).
+  Measured on the real org: **adding a comment and linking a PR both bump it**.
+  So `rtfm ado watch` picks up new discussion and new development links. That
+  closes, for ADO, both of the known watch gaps: Jira's (PR activity doesn't move
+  `updated`, §2.16) and Confluence's (comments don't move the version, 1.8.0).
+  Floor is 60 s, per the API's polling etiquette.
+- **Development data comes from the documented Git REST API.** Jira's comes
+  from an undocumented endpoint, which is why it is "best-effort by
+  construction". ADO's comes from `ArtifactLink` relations on the item
+  (`vstfs:///Git/PullRequestId|Commit|Ref/…`), resolved with ordinary Git API
+  GETs, so it is less fragile. It is still never fatal:
+  - **PR descriptions are the prize**, not commit messages. In ADO the merge
+    commit is usually just `Merged PR 123: <title>`; the reasoning is written in
+    the PR description. So each PR gets **its own heading**
+    (`… > Development > Pull requests > PR 812: …`), one chunk per PR, where
+    Jira's PRs share a section (the per-object granularity lesson once more).
+    Live check: a question answerable only from PR descriptions ranked the right
+    PR chunks #1–#4.
+  - **Capped per item: 20 PRs + 20 commits, newest-linked first.** The overflow
+    is rendered ("… N more linked pull request(s)"), never dropped silently (§5).
+    The real org's first probe had **70** artifact links on one story. PRs are one
+    GET each (6 in parallel); commits are **one batched GET per repository**
+    (`commits?searchCriteria.ids=…`), and only truncated messages are re-read.
+  - **Code: Read is per project, so 401/403 latches per project**, with one
+    warning. This is the Jira 1.11.1 lesson applied from the start. A 404 (deleted
+    repo or PR) is counted and rendered as "N could not be read". A transient
+    error costs that one artifact, not the section.
+  - The artifact URI's `%2f` escape **varies in case between links on the same
+    item** (measured), so it is decoded, never string-matched.
+- **Connector record chunks are exempt from contradiction nomination.** The
+  first real crawl (25 items, 227 chunks) produced **40 nominations and no real
+  disagreement among them.** Two sibling stories' metadata lead chunks scored 0.99
+  (same area, iteration, state, assignee). Shared "Linked work items" lists and
+  PR field bullets made up the rest ("PR 1 completed" vs "PR 2 abandoned"). Those
+  are records the tracker owns, not claims anyone wrote. `ContradictionDetector
+  .IsRecordChunk` skips them as **either** side of a nomination: an `ado://`
+  chunk that is the lead (title + metadata) or sits under one of
+  `AdoDocumentRenderer.RecordSections` (`Linked work items`, `Links`,
+  `Development`). The section is read off the breadcrumb *after* the title,
+  because real titles contain ` > ` themselves. An unmatched title falls back to
+  eligible, which is the pre-existing behaviour. After the exemption: **40 → 0**.
+  A planted doc contradicting one item's repro steps was still nominated (0.79),
+  so claims stay in play. **Jira almost certainly has the same noise** (its
+  metadata blockquote, `Linked issues`, and `Development` sections are the same
+  shape). It was left unmeasured and untouched here. Extending the exemption is
+  one registry entry, once someone measures it.
+- **Multi-line fields follow their declared format.** `multilineFieldsFormat`
+  says per field whether it is `html` (through the shared ReverseMarkdown tail)
+  or `markdown` (passthrough). Comments carry their own `format`. Known rich
+  fields render in a fixed order (Description, Acceptance criteria, Repro steps,
+  System info), then any custom rich-text field the org defined.
+  `System.History` is skipped: it echoes the latest comment, and the comments
+  API (`7.1-preview.4`; the bare `7.1` is rejected with HTTP 400) is the real
+  source.
+- **Third parallel namespace.** `Rtfm.Core/AzureDevOps/` mirrors `Jira/`
+  (§2.17's "independent beats prematurely-DRY"). The config store, monitor store,
+  crawler loop, and CLI purge/watch scaffolding now exist in three copies. If a
+  fourth API connector arrives, extract those first.
+- **Out of scope:** Azure DevOps **Server** (on-prem collections) uses
+  different auth and is rejected with a message, not guessed at. Attachments are
+  not indexed. Builds and wiki-page artifact links are ignored. "Items where I'm
+  @mentioned" is a notification concern, not retrieval, and was not built.
+
 ---
 
 ## 3. Tech stack / dependencies
@@ -682,6 +793,7 @@ tracker of tickets.
 | Email (`.eml`, `.mbox`) → markdown (Phase 24) | `MimeKit` (already shipped for MHTML) — quote/signature strip is hand-rolled |
 | Jira Cloud pull (Phase 25) | none — `HttpClient` (REST v3, Basic auth) + `System.Text.Json`; rendered-HTML fields reuse the ReverseMarkdown tail. The Development panel additionally reads `/rest/dev-status/` — **undocumented, best-effort, never fatal** (§2.16) |
 | Confluence Cloud pull (Phase 26) | none — `HttpClient` (REST v1, Basic auth) + `System.Text.Json`; `body.view` HTML reuses the ReverseMarkdown tail *and* the heading-aware chunker |
+| Azure DevOps pull (Phase 27) | none: `HttpClient` (REST 7.1, GET only) + `System.Text.Json`; auth via the Azure CLI (`az account get-access-token`, run as a process) or a PAT. Development data uses the **documented** Git REST API (contrast Jira, §2.16) |
 | Tables fallback (docx route only, if needed) | `DocumentFormat.OpenXml` |
 | Search store | OpenSearch (single-node, Docker) |
 | OpenSearch client | official `opensearch-net` (low-level where typed client is awkward) |
@@ -2133,6 +2245,54 @@ scope. Node count is capped (80) with the remainder reported (§5), children sor
 naturally so `AEXP-19` precedes `AEXP-100`, and a parent cycle can't strand a
 node (unvisited items are shown under `unplaced`). Presentation only, on stderr,
 gated on `Ui.Fancy` — redirected output is unchanged.
+
+### Phase 27 — Azure DevOps work items: pull + traversal + polling watch (§2.18) ✅ **Done**
+The Jira connector's model applied to Azure DevOps Boards: configure an
+organization, index work items by id or URL (with their link neighbourhood and
+their pull requests/commits), keep a monitored set fresh on `System.Rev`, purge.
+Built in one pass rather than Phase 25's four steps, because the template
+already existed.
+**Done when:** `rtfm ado index <id>` indexes a real work item as breadcrumbed
+thread-granular chunks under `ado://{org}/{id}` and `search_docs` answers from
+them; a crawl is leash-bounded with the remainder reported; `watch` re-indexes a
+changed item within one poll; `purge` (one, `--all`, and the general
+`rtfm purge <project>`) removes it all; and no client request is ever anything
+but a GET.
+
+*Delivered:* `Rtfm.Core/AzureDevOps/`:
+- `AdoConfig` + `AdoOrganization` (any org/project/work-item URL or bare name →
+  the org; on-prem rejected) and `AdoConfigStore`.
+- `AdoCredential.cs`: `IAdoCredential`, `AzCliCredential` (the resource
+  fallback, cmd.exe on Windows, arg validation, cache + refresh, actionable
+  `az login` failures) and `PatCredential`.
+- `AdoClient`: one private GET; 401 refresh-once; 429/503 `Retry-After` back-off
+  ×3; 203 = auth failure; `Parse` / `ParseArtifact` / `ParsePullRequest` /
+  `ParseCommit` / `PlanDevelopment` as tested seams.
+- `AdoDocumentRenderer`, `AdoCrawler` (multi-seed BFS, seeds first;
+  seed-only, opt-in `#123` mentions that ignore `&#…;` entities and CSS colours),
+  `AdoMonitorStore` and `AdoSource`.
+- Wiring: CLI `rtfm ado config|index|watch|purge|list`; `rtfm purge <project>`
+  and `rtfm describe project` know about ADO (`ado` source kind, connector row,
+  whole-key labels); `ContradictionDetector.IsRecordChunk` (§2.18). No MCP tool
+  changes: indexed work items are ordinary chunks.
+
+**Verified live** against the real org with the `az` login, read-only:
+- **Config.** The GUID resource failed with AADSTS500011 and the legacy URI was
+  taken automatically.
+- **Index.** A dry run of one story resolved 20 PRs + 20 commits in 5 s. A real
+  2-seed crawl at depth 2 with `--max-items 25` indexed 25 items / 227 chunks /
+  100% embedded in 36 s and reported "903 more discovered but not followed".
+- **Search.** A question answerable only from PR descriptions hit the PR chunks
+  #1–#4 (0.95–0.88).
+- **Watch.** `--once` reported no changes. Backdating one stored rev re-indexed
+  exactly that item (11 → 11 chunks, idempotent), and the next poll was clean.
+- **Describe and purge.** `describe` showed the connector and `ado` kind.
+  `purge <work item URL>` removed 11 chunks and dropped the item from the set.
+  `rtfm purge <project>` removed the ADO config + monitor.
+- **Contradictions.** The record-chunk exemption took nominations from 40 to 0
+  while a planted repro-steps contradiction was still nominated.
+
+399 tests (89 new). Released as 1.14.0 (additive, minor).
 
 **Deliberately not planned:** web UI (the LLM client is the UX, §2.11), cloud
 sync/hosting (per-dev local is the model, §intro). (Confluence API pull was

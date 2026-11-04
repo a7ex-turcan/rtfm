@@ -14,6 +14,46 @@ Each released version also appears as a
 `vX.Y.Z` tag runs the release workflow, which publishes the NuGet packages and
 mirrors the matching section below into the release notes.
 
+## [1.14.0] - 2026-11-04
+
+### Added
+- **Azure DevOps work items: `rtfm ado`.** Pull work items from an Azure
+  DevOps Services organization and index them alongside your docs. This mirrors
+  the Jira integration and is read-only (`GET` only):
+
+  ```bash
+  rtfm ado config --url https://dev.azure.com/your-org --project myproject
+  rtfm ado index 4512 --project myproject
+  rtfm ado watch --project myproject
+  ```
+
+  - **No token to manage.** Auth defaults to your Azure CLI login. RTFM asks
+    `az account get-access-token` for a short-lived token, keeps it only in
+    memory, and refreshes it as needed. If you'd rather use a Personal Access
+    Token, `--token-env AZURE_DEVOPS_EXT_PAT` reads one from the environment.
+  - **Follows the graph.** `index` takes ids or pasted work item URLs and
+    follows every work-item link (parent, children, related, dependencies)
+    within `--depth` and `--max-items`. Anything the budget cuts is reported.
+    `--dry-run` previews the crawl.
+  - **Thread-granular.** Description, acceptance criteria, repro steps, custom
+    rich-text fields, and each comment get their own chunk, with the real
+    authors and dates.
+  - **Pull requests and commits.** Each linked pull request becomes its own
+    chunk, including its description, which is where Azure DevOps teams usually
+    write the reasoning behind a change. Commit messages are indexed too. Up to
+    20 of each per work item, newest first, and the remainder is stated.
+  - **`watch` catches comments and new PRs.** It polls each item's revision
+    number, and adding a comment or linking a PR bumps that number. So `watch`
+    re-indexes on new discussion and new development work, not only on field
+    edits.
+  - **Contradiction detection only compares what people wrote.** Work item
+    metadata, linked-item lists, and pull request details are records the
+    tracker owns. Comparing them produced 40 false nominations in a 25-item
+    test crawl, so they are excluded. Descriptions, acceptance criteria, repro
+    steps, and comments are still compared.
+  - `purge <id|URL>`, `purge --all`, and `rtfm purge <project>` clean it all up.
+    `rtfm describe project` shows the connector and the `ado` source type.
+
 ## [1.13.0] - 2026-09-24
 
 ### Added

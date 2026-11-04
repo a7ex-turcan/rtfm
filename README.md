@@ -8,7 +8,7 @@
   <a href="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml"><img src="https://github.com/a7ex-turcan/rtfm/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Cli"><img src="https://img.shields.io/nuget/v/Rtfm.Cli?logo=nuget&label=Rtfm.Cli" alt="Rtfm.Cli on NuGet"></a>
   <a href="https://www.nuget.org/packages/Rtfm.Mcp"><img src="https://img.shields.io/nuget/v/Rtfm.Mcp?logo=nuget&label=Rtfm.Mcp" alt="Rtfm.Mcp on NuGet"></a>
-  <img src="https://img.shields.io/badge/version-1.13.0-FF8C00" alt="version 1.13.0">
+  <img src="https://img.shields.io/badge/version-1.14.0-FF8C00" alt="version 1.14.0">
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational" alt="cross-platform">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
@@ -318,6 +318,7 @@ that repo's `.mcp.json` instead of relying on either variable.
 | `rtfm db`             | `list [--project <name>]` &nbsp;or&nbsp; `query <name> "<sql>" [--project <name>] [--max-rows <n>]` | The live-data gateway. `list` shows the `.rtfmdb` connectors found in your indexed folders and each one's access (schema-only / read-only / read+write); `query` runs SQL against one and prints the rows. Only descriptors carrying a `query` block are queryable, and they're read-only unless the block sets `allowWrites`. Results are capped (default 500 rows) and say so when truncated.                                                                                                                                                                                                                     |
 | `rtfm jira`           | `config --url <ws> --email <you> [--token-env <VAR>] [--project <name>]` &nbsp;·&nbsp; `index <ISSUE-KEY> [--project <name>] [--depth <n>] [--max-tickets <n>] [--follow-mentions] [--dry-run]` &nbsp;·&nbsp; `watch [--project <name>] [--interval <s>] [--once]` &nbsp;·&nbsp; `purge <ISSUE-KEY>\|--all [--project <name>] [--yes]` &nbsp;·&nbsp; `list`                   | Pull Jira tickets over the Cloud REST API and index them (**read-only** — `rtfm` never writes to Jira). `config` stores a per-project workspace descriptor (URL + email + a `${ENV}` reference to your API token, expanded at call time — the token itself lives only in the environment) and verifies auth. `index <KEY>` pulls the ticket **and follows its links** — issue links, parent, subtasks, and epic children — breadth-first to `--depth` (default 2), bounded by a `--max-tickets` budget (dropped links are reported), and indexes each into `--project` as thread-granular chunks (description + one chunk per comment, breadcrumb `KEY: summary > Comment by author, date`), under source keys `jira://KEY`. Each ticket's **Development panel** — linked branches, pull requests, and commit messages — is pulled too, as its own `> Development > …` chunks (best-effort: if that endpoint is unavailable you get a warning and the ticket still indexes). `--follow-mentions` also chases `KEY-123` mentions in the seed's text; `--dry-run` previews the crawl plan without indexing. Every indexed ticket joins the project's **monitored set**. `watch` polls Jira on an interval (`--interval <s>`, default from config; `--once` for a single pass) and re-indexes any monitored ticket whose `updated` changed — the first poll after a restart catches up on anything changed while it was off. `purge` drops one ticket (or `--all`) from the index and the monitored set. `list` shows configured workspaces. |
 | `rtfm confluence`     | `config --url <ws> --email <you> [--token-env <VAR>] [--project <name>]` &nbsp;·&nbsp; `index <PAGE\|FOLDER\|SPACE-URL\|id> [--project <name>] [--space <KEY>] [--depth <n>] [--max-pages <n>] [--dry-run]` &nbsp;·&nbsp; `watch [--project <name>] [--interval <s>] [--once]` &nbsp;·&nbsp; `purge <PAGE-URL\|id>\|--all [--project <name>] [--yes]` &nbsp;·&nbsp; `list`                   | Pull Confluence pages over the Cloud REST API and index them (**read-only**). `config` stores a per-project workspace descriptor (URL + email + a `${ENV}` reference to your API token; default env var `CONFLUENCE_TOKEN`) and verifies auth. `index <URL>` accepts a **page URL** (indexes the page + its whole subtree), a **folder URL** (its subtree), a **space URL** or `--space <KEY>` (the whole space), or a bare page id. `--space` is **repeatable** and combines with a URL/id, so several spaces index in one run (`--space PR --space PH`) — sharing one visited-set and one `--max-pages` budget, so overlapping pages are fetched once and the budget is a ceiling on the run, not per space. RTFM resolves the scope via CQL and then following **in-body page links** breadth-first to `--depth` (default 2), bounded by `--max-pages` (dropped pages reported). Each page renders — headings and all, plus its footer and inline comments — into heading-breadcrumbed chunks under `confluence://{id}`, carrying its version author and date. `--dry-run` previews the scope. Every indexed page joins the project's **monitored set**. `watch` polls Confluence on an interval (`--interval <s>`; `--once` for a single pass) and re-indexes any monitored page whose `version.number` increased — the first poll after a restart catches up on anything changed while it was off. `purge` drops one page (or `--all`) from the index and the monitored set. `list` shows configured workspaces. |
+| `rtfm ado`            | `config --url <org URL> [--project <name>] [--token-env <VAR>] [--tenant <id>]` &nbsp;·&nbsp; `index <ID\|URL>... [--project <name>] [--depth <n>] [--max-items <n>] [--follow-mentions] [--dry-run]` &nbsp;·&nbsp; `watch [--project <name>] [--interval <s>] [--once]` &nbsp;·&nbsp; `purge <ID\|URL>\|--all [--project <name>] [--yes]` &nbsp;·&nbsp; `list` | Pull Azure DevOps work items over the REST API and index them (**read-only**, `GET` only). Auth defaults to your **Azure CLI** login (a short-lived token from `az account get-access-token`, never stored); `--token-env` uses a PAT from that environment variable instead. `index` takes ids or work item URLs and **follows every work-item link** (parent, children, related, dependencies) breadth-first to `--depth` (default 2), bounded by `--max-items` (dropped links are reported). Each item becomes thread-granular chunks under `ado://{org}/{id}`: description, acceptance criteria, repro steps, custom rich-text fields, one chunk per comment, and **one chunk per linked pull request** (with its description), plus the linked commits' messages. Every indexed item joins the project's **monitored set**; `watch` re-indexes any whose `System.Rev` moved, which includes new comments and newly linked PRs. `purge` drops one item (or `--all`). `list` shows configured organizations. |
 | `rtfm purge`          | `<project> [--yes]`                                                                                 | Removes **everything** for one project: its chunks in OpenSearch, its watch manifests, its contradiction pairs, and its override notes. Shows what's on the block and asks first; `--yes` skips the prompt (and is required when output is redirected). Other projects are untouched.                                                                                                                                                                                                                                                                                                                               |
 | `rtfm convert`        | `<path>`                                                                                            | Dev aid: converts one document to markdown on stdout (pipe-friendly, no styling).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `rtfm chunk`          | `<path>`                                                                                            | Dev aid: converts, then prints the heading-aware chunks with their breadcrumbs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -571,6 +572,95 @@ rtfm confluence purge --all --project myproject         # drop every Confluence 
 > **Tip.** As with Jira, an agent scoped to `myproject` (via `RTFM_PROJECT` in
 > `.mcp.json`) searches these wiki pages alongside the project's other docs —
 > ask it about a topic and the answer can come straight from the indexed page.
+
+## Indexing Azure DevOps work items
+
+RTFM can pull work items from an Azure DevOps Services organization (Boards) and
+index them the way it indexes Jira tickets: a work item, plus everything it links
+to, plus the pull requests and commits that implemented it. Like the Atlassian
+integrations this is **read-only**: RTFM only ever issues `GET`. It never edits a
+work item, posts a comment, or changes a state.
+
+**1. Sign in.** By default RTFM borrows your **Azure CLI** login, so there's no
+token to create and nothing secret is stored:
+
+```bash
+az login          # once; add --tenant <id> if the organization lives in another tenant
+```
+
+RTFM asks `az account get-access-token` for a short-lived token when it needs
+one, keeps it in memory only, and refreshes it when it expires. No `az`, or would
+rather not use it? Create a **Personal Access Token** with *Work Items: Read* (add
+*Code: Read* so pull requests and commits come along) and put it in an
+environment variable. The default is `AZURE_DEVOPS_EXT_PAT`, the same variable the
+`azure-devops` CLI extension reads.
+
+**2. Configure the organization** (once per project). Paste any URL from the
+organization (the org, a project, or a work item). RTFM keeps just the
+organization:
+
+```bash
+rtfm ado config --url https://dev.azure.com/your-org --project myproject
+
+# or with a PAT instead of the Azure CLI:
+rtfm ado config --url https://dev.azure.com/your-org --project myproject --token-env AZURE_DEVOPS_EXT_PAT
+```
+
+This verifies the credential right away (a read-only `GET _apis/connectionData`)
+and saves the descriptor under `LocalApplicationData/rtfm/ado/`. Optional flags
+set defaults for later runs: `--max-depth <n>` (default 2), `--max-items <n>`
+(crawl budget, default 150), `--poll <seconds>` (default 300, minimum 60),
+`--follow-mentions`, and, for `az` auth, `--tenant <id>` and
+`--resource <id>`. You only need `--resource` if your tenant rejects both of the
+identifiers RTFM tries for Azure DevOps.
+
+**3. Index work items, and everything they link to.** Pass ids or paste work
+item URLs straight from the browser:
+
+```bash
+rtfm ado index 4512 --project myproject
+rtfm ado index 4512 4513 4600 --project myproject                     # one crawl, one shared budget
+rtfm ado index https://dev.azure.com/your-org/Proj/_workitems/edit/4512 --project myproject
+rtfm ado index 4000 --project myproject --dry-run                     # preview an epic's crawl first
+```
+
+> Use bare ids on the command line. An unquoted `#4512` is a comment in most
+> shells, so the argument never arrives.
+
+The crawl follows every work-item link (parent, children, related,
+predecessor/successor, duplicates, tests) breadth-first, within the depth and
+budget caps. Anything the budget cuts is reported. Each work item becomes
+thread-granular chunks: the description, acceptance criteria, repro steps and any
+custom rich-text fields, plus one chunk per comment. Chunks carry the item's real
+authors and its `ChangedDate`.
+
+**Pull requests and commits come along too.** Each linked pull request becomes its
+own chunk (`… > Development > Pull requests > PR 812: …`), including its
+**description**. In Azure DevOps that is usually where the reasoning behind a
+change is written. Commits are indexed with their full messages. RTFM resolves up
+to 20 pull requests and 20 commits per work item, newest first, and states how
+many more there are. If your credential can't read one project's code, you get
+one warning and that project's items index without the development details.
+
+**4. Keep them fresh.** Every indexed work item joins the project's *monitored
+set*. `watch` polls each item's revision number (`System.Rev`) and re-indexes the
+ones that moved:
+
+```bash
+rtfm ado watch --project myproject            # runs until Ctrl+C
+rtfm ado watch --project myproject --once     # a single poll (e.g. from cron)
+```
+
+Unlike Jira's `updated` stamp, an Azure DevOps revision also moves when someone
+adds a comment or links a pull request. So `watch` picks up new discussion and
+new PRs as well as field edits.
+
+**5. Stop monitoring / clean up.**
+
+```bash
+rtfm ado purge 4512 --project myproject      # drop one work item
+rtfm ado purge --all --project myproject     # drop every work item in the project
+```
 
 ## Supported formats & how they're read
 

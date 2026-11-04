@@ -152,6 +152,11 @@ public sealed class ContradictionDetector(OpenSearchGateway gateway)
         for (var i = 0; i < chunks.Count; i++)
         {
             var chunk = chunks[i];
+            if (IsRecordChunk(chunk.SourcePath, chunk.HeadingPath, chunk.DocumentTitle))
+            {
+                continue;
+            }
+
             var body = BuildCandidateQuery(vectors[i], chunk.SourcePath, chunk.Project);
             var json = await gateway.SearchAsync(RtfmIndex.Name, body, cancellationToken: cancellationToken).ConfigureAwait(false);
 
@@ -381,6 +386,11 @@ public sealed class ContradictionDetector(OpenSearchGateway gateway)
 
             var source = hit.GetProperty("_source");
             var otherHeading = GetString(source, "heading_path") ?? string.Empty;
+            if (IsRecordChunk(GetString(source, "source_path"), otherHeading, GetString(source, "title")))
+            {
+                continue;
+            }
+
             var otherContent = GetString(source, "content") ?? string.Empty;
             var otherText = StripBreadcrumb(otherContent, otherHeading);
             var otherModified = TryGetDate(source, "source_modified_at");
@@ -499,6 +509,57 @@ public sealed class ContradictionDetector(OpenSearchGateway gateway)
     }
 
     /// <summary>
+    /// True for a connector <b>record</b> chunk — machine-generated facts the
+    /// tracker owns, not claims anyone wrote: an Azure DevOps work item's lead
+    /// chunk (title + metadata blockquote) and its
+    /// <see cref="AzureDevOps.AdoDocumentRenderer.RecordSections"/> (linked
+    /// items, hyperlinks, development). Neither side of a nomination may be one.
+    ///
+    /// <para>Why (§2.18, measured): sibling stories share area, iteration,
+    /// state, and author, so their metadata chunks embed near-identically — the
+    /// first real crawl (25 items) nominated 40 pairs, led by two lead chunks at
+    /// 0.99, and none of them were disagreements. "PR 1 completed" vs "PR 2
+    /// abandoned" is not a contradiction either; the tracker is the authority on
+    /// its own records. Descriptions, acceptance criteria, repro steps, and
+    /// comments stay eligible — that is where conflicting claims live.</para>
+    ///
+    /// The section is read off the breadcrumb <em>after</em> the document title,
+    /// because real titles themselves contain " &gt; " (shaped like "Admin portal
+    /// &gt;Users &gt; Invites"). If the title can't be matched as the
+    /// breadcrumb's prefix, the chunk is treated as eligible — the safe default
+    /// is the pre-existing behaviour, not suppression.
+    /// </summary>
+    internal static bool IsRecordChunk(string? sourcePath, string? headingPath, string? title)
+    {
+        if (sourcePath is null || headingPath is null || string.IsNullOrWhiteSpace(title)
+            || !AzureDevOps.AdoSource.IsAdoKey(sourcePath))
+        {
+            return false;
+        }
+
+        var root = title.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (!headingPath.StartsWith(root, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = headingPath[root.Length..];
+        if (rest.Length == 0)
+        {
+            return true; // the lead chunk: title + metadata blockquote
+        }
+
+        if (!rest.StartsWith(" > ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var section = rest[3..];
+        var end = section.IndexOf(" > ", StringComparison.Ordinal);
+        return AzureDevOps.AdoDocumentRenderer.RecordSections.Contains(end < 0 ? section : section[..end]);
+    }
+
+    /// <summary>
     /// The dumb heuristic (§2.13): different source dates and not
     /// near-identical text. Identical text is a copy, not a contradiction;
     /// same-date chunks are siblings of one export, not doc drift.
@@ -560,7 +621,7 @@ public sealed class ContradictionDetector(OpenSearchGateway gateway)
                     },
                 },
             },
-            _source = new[] { "source_path", "ordinal", "heading_path", "content", "source_modified_at" },
+            _source = new[] { "source_path", "ordinal", "heading_path", "content", "source_modified_at", "title" },
         });
 
     internal static string BuildBulkPayload(IReadOnlyList<ContradictionPair> pairs, DateTimeOffset detectedAt)

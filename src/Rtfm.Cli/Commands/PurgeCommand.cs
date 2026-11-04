@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rtfm.Core.AzureDevOps;
 using Rtfm.Core.Confluence;
 using Rtfm.Core.Indexing;
 using Rtfm.Core.Jira;
@@ -50,8 +51,11 @@ internal static class PurgeCommand
         var jiraMonitored = JiraMonitorStore.Load(project).Count;
         var confluenceConfigured = ConfluenceConfigStore.Load(project) is not null;
         var confluenceMonitored = ConfluenceMonitorStore.Load(project).Count;
+        var adoConfigured = AdoConfigStore.Load(project) is not null;
+        var adoMonitored = AdoMonitorStore.Load(project).Count;
 
-        if (chunks == 0 && manifests == 0 && !jiraConfigured && jiraMonitored == 0 && !confluenceConfigured && confluenceMonitored == 0)
+        if (chunks == 0 && manifests == 0 && !jiraConfigured && jiraMonitored == 0 && !confluenceConfigured && confluenceMonitored == 0
+            && !adoConfigured && adoMonitored == 0)
         {
             Ui.Err.MarkupLine($"Nothing indexed under project [{Ui.Accent}]{Ui.E(project)}[/] — nothing to purge.");
             return 0;
@@ -62,6 +66,7 @@ internal static class PurgeCommand
             + $"[bold]{manifests}[/] watch manifest{(manifests == 1 ? "" : "s")}"
             + (jiraConfigured || jiraMonitored > 0 ? $", [bold]Jira[/] config{(jiraMonitored > 0 ? $" + {jiraMonitored} monitored ticket(s)" : "")}" : "")
             + (confluenceConfigured || confluenceMonitored > 0 ? $", [bold]Confluence[/] config{(confluenceMonitored > 0 ? $" + {confluenceMonitored} monitored page(s)" : "")}" : "")
+            + (adoConfigured || adoMonitored > 0 ? $", [bold]Azure DevOps[/] config{(adoMonitored > 0 ? $" + {adoMonitored} monitored work item(s)" : "")}" : "")
             + ".");
 
         if (!yes)
@@ -90,12 +95,14 @@ internal static class PurgeCommand
         var removedPairs = await new Rtfm.Core.Contradictions.ContradictionDetector(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
         var removedNotes = await new Rtfm.Core.Notes.NotesStore(gateway).PurgeProjectAsync(project).ConfigureAwait(false);
 
-        // Jira/Confluence chunks carry the project keyword, so they were already
+        // Jira/Confluence/Azure DevOps chunks carry the project keyword, so they were already
         // deleted above; drop the connector configs + monitored sets so nothing lingers.
         var removedJiraConfig = JiraConfigStore.Remove(project);
         var removedJiraMonitor = JiraMonitorStore.Remove(project);
         var removedConfluenceConfig = ConfluenceConfigStore.Remove(project);
         var removedConfluenceMonitor = ConfluenceMonitorStore.Remove(project);
+        var removedAdoConfig = AdoConfigStore.Remove(project);
+        var removedAdoMonitor = AdoMonitorStore.Remove(project);
 
         Ui.Err.MarkupLine(
             $"[green]Purged[/] project [{Ui.Accent}]{Ui.E(project)}[/]: "
@@ -104,6 +111,7 @@ internal static class PurgeCommand
             + $"[bold]{removedNotes}[/] note{(removedNotes == 1 ? "" : "s")} removed"
             + (removedJiraConfig || removedJiraMonitor ? ", [bold]Jira[/] config + monitor removed" : "")
             + (removedConfluenceConfig || removedConfluenceMonitor ? ", [bold]Confluence[/] config + monitor removed" : "")
+            + (removedAdoConfig || removedAdoMonitor ? ", [bold]Azure DevOps[/] config + monitor removed" : "")
             + ".");
         return 0;
     }
