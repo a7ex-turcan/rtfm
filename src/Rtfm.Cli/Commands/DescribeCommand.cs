@@ -116,8 +116,8 @@ internal static class DescribeCommand
     /// Display labels for source paths: the filename, extended leftwards by as
     /// many folder segments as it takes to stay unique — four documents called
     /// <c>the-workflow.md</c> in different folders must not render as four
-    /// identical rows. Synthetic keys (<c>jira://</c>, <c>confluence://</c>) are
-    /// already unique and are shown whole.
+    /// identical rows. Synthetic keys (<c>jira://</c>, <c>confluence://</c>,
+    /// <c>ado://</c>) are already unique and are shown whole.
     /// </summary>
     private static Dictionary<string, string> BuildLabels(IEnumerable<string> paths)
     {
@@ -191,19 +191,25 @@ internal static class DescribeCommand
 
     private static void RenderConnectors(ProjectDescription p)
     {
-        if (p.Jira is null && p.Confluence is null)
+        if (p.Jira is null && p.Confluence is null && p.AzureDevOps is null)
         {
             return;
         }
 
         Section("Connectors:");
-        foreach (var c in new[] { p.Jira, p.Confluence }.OfType<ConnectorSummary>())
+        foreach (var c in new[] { p.Jira, p.Confluence, p.AzureDevOps }.OfType<ConnectorSummary>())
         {
-            var unit = c.Kind == "Jira" ? "ticket" : "page";
+            var unit = c.Kind switch { "Jira" => "ticket", "Azure DevOps" => "work item", _ => "page" };
+
+            // Azure DevOps has no account email: by default it borrows the Azure
+            // CLI login, so there is no token reference to show either.
+            var credential = c.Kind != "Azure DevOps" ? $"{c.Email}, token {c.TokenReference}"
+                : c.Email == "PAT" ? $"PAT {c.TokenReference}"
+                : "Azure CLI login";
             Ui.Out.MarkupLine(
-                $"  [{Ui.Accent}]{Ui.E(c.Kind.PadRight(10))}[/] {Ui.E(c.BaseUrl)}  [dim]{Ui.E(c.Email)}, token {Ui.E(c.TokenReference)}[/]");
+                $"  [{Ui.Accent}]{Ui.E(c.Kind.PadRight(12))}[/] {Ui.E(c.BaseUrl)}  [dim]{Ui.E(credential)}[/]");
             Ui.Out.MarkupLine(
-                $"  {new string(' ', 10)} [dim]{c.Monitored} {unit}{S(c.Monitored)} monitored, "
+                $"  {new string(' ', 12)} [dim]{c.Monitored} {unit}{S(c.Monitored)} monitored, "
                 + $"last poll {(c.LastPolledAt is { } t ? t.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")}, every {c.PollSeconds}s[/]");
         }
     }
@@ -346,7 +352,8 @@ internal static class DescribeCommand
 
     private static bool IsSynthetic(string path)
         => path.StartsWith("jira://", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("confluence://", StringComparison.OrdinalIgnoreCase);
+            || path.StartsWith("confluence://", StringComparison.OrdinalIgnoreCase)
+            || Rtfm.Core.AzureDevOps.AdoSource.IsAdoKey(path);
 
     private static string Truncate(string text, int max)
     {

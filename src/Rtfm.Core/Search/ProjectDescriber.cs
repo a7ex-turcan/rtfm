@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rtfm.Core.AzureDevOps;
 using Rtfm.Core.Confluence;
 using Rtfm.Core.Contradictions;
 using Rtfm.Core.Database;
@@ -21,7 +22,11 @@ public sealed record ContradictionSummary(int Open, int LikelySupersession, int 
     public int Total => Open + Dismissed + Resolved;
 }
 
-/// <summary>A configured API-pull connector (§2.16 Jira / §2.17 Confluence) and its monitored set.</summary>
+/// <summary>
+/// A configured API-pull connector (§2.16 Jira / §2.17 Confluence / §2.18 Azure
+/// DevOps) and its monitored set. For Azure DevOps, <see cref="Email"/> carries
+/// the auth mode ("Azure CLI" / "PAT") — it has no account email to show.
+/// </summary>
 public sealed record ConnectorSummary(
     string Kind,
     string BaseUrl,
@@ -49,7 +54,8 @@ public sealed record ProjectDescription(
     ContradictionSummary Contradictions,
     IReadOnlyList<ContradictionPair> OpenPairs,
     ConnectorSummary? Jira,
-    ConnectorSummary? Confluence)
+    ConnectorSummary? Confluence,
+    ConnectorSummary? AzureDevOps = null)
 {
     /// <summary>
     /// False when RTFM has never heard of this project — nothing indexed, no
@@ -64,7 +70,8 @@ public sealed record ProjectDescription(
         || Notes.Count > 0
         || Contradictions.Total > 0
         || Jira is not null
-        || Confluence is not null;
+        || Confluence is not null
+        || AzureDevOps is not null;
 }
 
 /// <summary>
@@ -111,7 +118,8 @@ public sealed class ProjectDescriber(OpenSearchGateway gateway)
             Contradictions: contradictions,
             OpenPairs: openPairs,
             Jira: DescribeJira(project),
-            Confluence: DescribeConfluence(project));
+            Confluence: DescribeConfluence(project),
+            AzureDevOps: DescribeAzureDevOps(project));
     }
 
     private async Task<ContradictionSummary> SummarizeContradictionsAsync(string project, CancellationToken cancellationToken)
@@ -148,11 +156,29 @@ public sealed class ProjectDescriber(OpenSearchGateway gateway)
         return new ConnectorSummary("Confluence", config.BaseUrl, config.Email, config.Token, monitor.Count, monitor.LastPolledAt, config.PollSeconds);
     }
 
+    private static ConnectorSummary? DescribeAzureDevOps(string project)
+    {
+        if (AdoConfigStore.Load(project) is not { } config)
+        {
+            return null;
+        }
+
+        var monitor = AdoMonitorStore.Load(project);
+        return new ConnectorSummary(
+            "Azure DevOps",
+            config.OrganizationUrl,
+            config.UsesPat ? "PAT" : "Azure CLI",
+            config.UsesPat ? config.Token ?? "(none)" : config.Resource ?? "default resource",
+            monitor.Count,
+            monitor.LastPolledAt,
+            config.PollSeconds);
+    }
+
     // ---- pure logic (internal for tests) ----
 
     /// <summary>
     /// Groups documents by source kind, biggest first. Synthetic keys
-    /// (<c>jira://</c>, <c>confluence://</c>) name their product — they have no
+    /// (<c>jira://</c>, <c>confluence://</c>, <c>ado://</c>) name their product — they have no
     /// extension and must never see <see cref="Path"/> handling (§2.16);
     /// everything else is keyed by its file extension.
     /// </summary>
@@ -174,6 +200,11 @@ public sealed class ProjectDescriber(OpenSearchGateway gateway)
         if (sourcePath.StartsWith("confluence://", StringComparison.OrdinalIgnoreCase))
         {
             return "confluence";
+        }
+
+        if (AdoSource.IsAdoKey(sourcePath))
+        {
+            return "ado";
         }
 
         var extension = Path.GetExtension(sourcePath).TrimStart('.').ToLowerInvariant();
